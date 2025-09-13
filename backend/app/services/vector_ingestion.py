@@ -219,7 +219,8 @@ def ingest_unstructured_file(
     file_path: str,
     category: str,
     reference: str,
-    url: str
+    url: str,
+    fileId: str
 ) -> FileIngestionResult:
     """
     Main function to handle the ingestion of a single unstructured file.
@@ -273,6 +274,7 @@ def ingest_unstructured_file(
         
         return FileIngestionResult(
             fileName=file_name,
+            fileId=fileId,
             fileSize=file_size,
             status="success",
             ingestionDetails=ingestion_details
@@ -282,6 +284,7 @@ def ingest_unstructured_file(
         # 5. Create the failure response
         return FileIngestionResult(
             fileName=file_name,
+            fileId=fileId,
             fileSize=file_size,
             status="failed",
             error=f"An unexpected error occurred: {str(e)}"

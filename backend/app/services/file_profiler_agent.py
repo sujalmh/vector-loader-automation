@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 file_profiler_agent.py
 
@@ -203,7 +202,7 @@ class FileAnalyzer:
         - published_date: Fiscal year or month of reference
         - period_of_reference: Date range within the document
         - brief_summary: A concise summary (<= 3 sentences)
-        - document_size: File size in KB or MB
+        - quality_score: A file quality score out of 3, how well the file can be parsed (1-3)
 
         Rules:
         - Output valid JSON and nothing else.

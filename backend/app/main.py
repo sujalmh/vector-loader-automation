@@ -8,7 +8,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.services.process_file import process_pdf, csv_to_markdown_file
+from app.services.process_file import process_pdf
 from app.services.vector_ingestion import ingest_unstructured_file
 
 from app.models.model_definition import QualityMetrics, AnalysisResult, FileProcessingResult, FileIngestionResult, IngestionResponse, DownloadResult, UrlListRequest, FileMetadata, DownloadSuccess, DownloadError, ProcessingResult
@@ -59,8 +59,8 @@ origins = [
     "http://localhost:3000",
     "http://34.41.241.77:8071",
     "http://localhost:8071",
-    "http://0.0.0.0:3000"
-    "*"  # Using "*" is permissive; tighten this for production.
+    "http://0.0.0.0:3000",
+    "http://100.104.12.231:8071"
 ]
 
 app.add_middleware(
@@ -75,132 +75,149 @@ app.add_middleware(
 @app.post("/upload-files/", summary="Upload and Store Files Asynchronously")
 async def upload_and_store_files(files: List[UploadFile] = File(...)):
     """
-    Handles file uploads asynchronously, saving them to the server.
+    Handles file uploads asynchronously, saving them to the server with a unique ID.
 
-    This endpoint reads and writes files without blocking the server, making it
-    highly performant. It returns detailed metadata for each successfully
-    stored file.
+    This endpoint generates a UUID for each file to prevent filename collisions
+    and returns detailed metadata, including the unique ID, for each
+    successfully stored file.
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files were sent.")
 
-    # This list will hold the metadata for the frontend (like FileData)
     response_data = []
 
     for file in files:
-        # Create a secure and OS-agnostic path to the file
-        file_path = UPLOAD_DIRECTORY / file.filename # type: ignore
-        
         try:
-            # 1. Read the file's content in an async manner
-            content = await file.read()
+            # 1. Generate a unique ID and secure filename
+            file_id = str(uuid.uuid4())
+            original_filename = file.filename or "unknown"
+            # Get the file extension (e.g., ".pdf", ".jpg")
+            suffix = Path(original_filename).suffix
+            unique_filename = f"{file_id}{suffix}"
+            file_path = UPLOAD_DIRECTORY / unique_filename
 
-            # 2. Write the file to disk asynchronously
+            # 2. Read and write the file content
+            content = await file.read()
             async with aiofiles.open(file_path, "wb") as buffer:
                 await buffer.write(content)
 
-            # 3. Gather metadata to return to the client
+            # 3. Gather metadata, now including the unique ID
             response_data.append(
                 {
-                    "name": file.filename,
-                    "path": str(file_path.resolve()), # Absolute server path
-                    "size": len(content), # Get size from the read content
-                    "type": file.content_type, # Use the MIME type from the upload
+                    "id": file_id, # <-- Add the unique ID here
+                    "name": original_filename, # Keep the original name for display
+                    "path": str(file_path.resolve()), # The new, unique server path
+                    "size": len(content),
+                    "type": file.content_type,
                 }
             )
 
         except Exception as e:
-            # If any file fails, return an error immediately
             raise HTTPException(
                 status_code=500,
                 detail=f"Could not save file: {file.filename}. Error: {e}",
             )
-
+    print(response_data)
     return {
         "message": f"Successfully stored {len(response_data)} file(s).",
         "files": response_data,
     }
 
 
-@app.post("/process-files", response_model=List[FileProcessingResult])
-async def process_files(files: List[UploadFile] = File(...)):
+async def _process_saved_files(saved_files: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
     """
-    Receives a list of files, processes each one to generate metrics
-    and classification, and returns the results.
+    Generator that processes already-saved files and yields SSE events.
+    Each element in saved_files = (file_id, file_path).
     """
+    for file_info in saved_files:
+        file_path = file_info["path"]
+        file_id = file_info["id"]
+        file_name = file_info["original_name"]
+
+        try:
+            processing_result = await process_pdf(file_path)
+
+            if not processing_result or "analysis" not in processing_result:
+                error_result = {
+                    "fileId": file_id,
+                    "fileName": os.path.basename(file_path),
+                    "error": "Processing returned no result."
+                }
+                yield f"data: {json.dumps(error_result)}\n\n"
+                continue
+
+            analysis_data = processing_result.get("analysis", {}).get("json", {})
+            analysis_result_model = AnalysisResult(**analysis_data)
+
+            final_result = FileProcessingResult(
+                fileId=file_id,
+                fileName=os.path.basename(file_path),
+                qualityMetrics=QualityMetrics(parseAccuracy=analysis_result_model.quality_score),
+                analysis=analysis_result_model
+            )
+            yield f"data: {final_result.model_dump_json()}\n\n"
+
+        except Exception as e:
+            error_result = {
+                "fileId": file_id,
+                "fileName": os.path.basename(file_path),
+                "error": f"Processing error: {e}"
+            }
+            yield f"data: {json.dumps(error_result)}\n\n"
+
+        finally:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+
+@app.post("/process-files")
+async def process_files_endpoint(
+    files: List[UploadFile] = File(...),
+    file_ids: List[str] = Form(...)
+):
     if not files:
         raise HTTPException(status_code=400, detail="No files were uploaded.")
 
-    results = []
-    for file in files:
-        if not file.filename:
+    saved_info = []  # list of dicts with {path, id, original_name}
+
+    for upload, fid in zip(files, file_ids):
+
+        if not upload.filename:
             continue
-        base_name = os.path.basename(file.filename)
-        file_path = os.path.join(UPLOAD_DIRECTORY, str(base_name))
 
-        if not os.path.exists(file_path):
-            raise HTTPException(
-                status_code=404,
-                detail=f"File not found: {file.filename}"
-            )
+        suffix = os.path.splitext(upload.filename)[1]
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=UPLOAD_DIRECTORY)
+        tmp_path = tmp.name
+        tmp.close()
 
-        result = process_pdf(file_path)
-        
-        print("Raw result from process_pdf:", result)  # Inspect the result
-
-        if not result:
-            if not file.filename:
-                continue
-            base_name = os.path.basename(file.filename)
-            file_path = os.path.join(UPLOAD_DIRECTORY, str(base_name))
-
-            if not os.path.exists(file_path):
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"File not found: {file.filename}"
-                )
-
-            result = process_pdf(file_path)
-            if not result:
-
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Could not process file: {file.filename}"
-                )
-        
         try:
-            # 1. Create the QualityMetrics object
-            quality_metrics = QualityMetrics(
-                parseAccuracy=result.get("avg_parse_quality", 0.0),
-                complexity=result.get("complexity_score", 0.0)
-            )
+            with open(tmp_path, "wb") as buffer:
+                while True:
+                    chunk = await upload.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    buffer.write(chunk)
+            await upload.close()
 
-            # 2. Create the AnalysisResult object
-            analysis_data = result.get("analysis", {}).get("json", {})
-            # Pass known fields directly and let Pydantic handle the rest
-            analysis_result = AnalysisResult(**analysis_data)
-
-
-            # 3. Create the final FileProcessingResult object
-            final_result = FileProcessingResult(
-                fileName=file.filename,
-                qualityMetrics=quality_metrics,
-                analysis=analysis_result
-            )
-            print(analysis_result)
-            results.append(final_result)
+            saved_info.append({
+                "path": tmp_path,
+                "id": fid,
+                "original_name": upload.filename
+            })
 
         except Exception as e:
-            # This will catch errors during Pydantic model validation
-            print(f"Error creating response model for {file.filename}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not create processing result for {file.filename}. Error: {e}"
-            )
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            continue
 
-    return results
+    return StreamingResponse(
+        _process_saved_files(saved_info),
+        media_type="text/event-stream"
+    )
 
-@app.post("/ingest/", response_model=IngestionResponse, tags=["Ingestion"])
+@app.post("/ingest/", tags=["Ingestion"])
 async def start_ingestion_process(
     files: List[UploadFile] = File(...),
     file_details: str = Form(...),
@@ -210,57 +227,67 @@ async def start_ingestion_process(
 
     try:
         details_list = json.loads(file_details)
-        print(f"Parsed file details: {details_list}")  # Debugging line
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_details or db_config.")
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_details.")
 
-    ingestion_results = []
-    files_map = {file.filename: file for file in files}
+    uploaded_files_map = {file.filename: file for file in files}
 
-    for details_data in details_list:
-        file_ingestion_result = []
-        filename = details_data.get("name")
-        if not filename:
+    async def ingestion_generator():
+        total_files = len(details_list)
+        for i, details_data in enumerate(details_list):
+            print(i, details_data)
+            filename = details_data.get("name")
+            if not filename or filename not in uploaded_files_map:
                 continue
-        filename_without_ext, file_type = os.path.splitext(str(filename))
-        full_filepath = details_data.get("path")
-        analysis = details_data.get("analysis")
-        intents = analysis.get("intents")
-        brief_summary = analysis.get("brief_summary")
-        subdomain = analysis.get("subdomain")
-        publishing_authority = analysis.get("publishing_authority")
-        source_url = details_data.get("sourceUrl")
 
-        try:
-            result_success = ingest_unstructured_file(
-                file_path=full_filepath,
-                category=subdomain,
-                reference=publishing_authority,
-                url=source_url if source_url else "https://esankhyiki.mospi.gov.in"
+            full_filepath = details_data.get("path")
+            
+            try:
+                # --- CORRECTED LOGIC ---
+                # 1. Call the ingestion function, which returns a complete result object
+                analysis = details_data.get("analysis", {})
+                ingestion_result_obj = ingest_unstructured_file(
+                    file_path=full_filepath,
+                    category=analysis.get("subdomain"),
+                    reference=analysis.get("publishing_authority"),
+                    url=details_data.get("sourceUrl") or "https://www.epfindia.gov.in/",
+                    fileId = details_data.get("id")
                 )
-            file_ingestion_result.append(result_success.ingestionDetails)
-            ingestion_results.append(result_success)
-        except ImportError:
-            print("\nPlease install fpdf to run the example with a dummy file: pip install fpdf")
-        except Exception as e:
-            print(f"\nAn error occurred during the example run: {e}")
-
-        ingestion_results.append(FileIngestionResult(
-                    fileName=str(filename),
-                    fileSize=details_data.get('size', 0),
-                    status="success",
-                    ingestionDetails=file_ingestion_result,
-                ))
-        if os.path.exists(full_filepath):
-            os.remove(full_filepath)
-            filename_without_ext, file_type = os.path.splitext(str(filename))
-            md_filepath = os.path.join(MARKDOWN_DIRECTORY, str(filename_without_ext)+'.md')
-            if os.path.exists(md_filepath):
-                os.remove(md_filepath)
                 
-    result = IngestionResponse(results=ingestion_results)
-    print(f"Ingestion results: {result}")
-    return result
+                # 2. Convert the entire Pydantic result object to a dictionary
+                # This correctly captures status, error, and ingestionDetails
+                result_payload = ingestion_result_obj.dict()
+                print(result_payload)
+                # 3. Add the progress, the only info unique to this loop
+                result_payload["progress"] = ((i + 1) / total_files) * 100
+
+            except Exception as e:
+                # This is a fallback for unexpected errors that ingest_unstructured_file might not catch
+                print(f"\nAn unhandled error occurred during ingestion for {filename}: {e}")
+                result_payload = {
+                    "fileName": filename,
+                    "fileId": details_data.get("id"),
+                    "fileSize": details_data.get('size', 0),
+                    "status": "failed",
+                    "error": f"An unhandled exception occurred in the endpoint: {str(e)}",
+                    "progress": ((i + 1) / total_files) * 100,
+                    "ingestionDetails": None
+                }
+            
+            finally:
+                # --- File cleanup runs regardless of the outcome ---
+                if os.path.exists(full_filepath):
+                    os.remove(full_filepath)
+                filename_without_ext, _ = os.path.splitext(str(filename))
+                md_filepath = os.path.join(MARKDOWN_DIRECTORY, str(filename_without_ext) + '.md')
+                if os.path.exists(md_filepath):
+                    os.remove(md_filepath)
+
+            # Yield the correctly formed result
+            yield f"data: {json.dumps(result_payload)}\n\n"
+            await asyncio.sleep(0.01)
+
+    return StreamingResponse(ingestion_generator(), media_type="text/event-stream")
 
 
 async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> DownloadResult:
@@ -318,3 +345,130 @@ async def download_from_urls(request: UrlListRequest):
         tasks = [download_and_save_file(client, url) for url in request.urls]
         results = await asyncio.gather(*tasks)
         return results
+    
+
+@app.post("/ingest/stream")
+async def start_ingestion_stream(
+    files: List[UploadFile] = File(...),
+    file_details: str = Form(...),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files were provided for ingestion.")
+
+    try:
+        details_list = json.loads(file_details)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_details.")
+
+    async def generator():
+        ingestion_results = []
+        total = len(details_list)
+        processed_count = 0
+
+        for details_data in details_list:
+            filename = details_data.get("name")
+            full_filepath = details_data.get("path")
+            analysis = details_data.get("analysis", {}) or {}
+            subdomain = analysis.get("subdomain")
+            publishing_authority = analysis.get("publishing_authority")
+            source_url = details_data.get("sourceUrl", "https://www.epfindia.gov.in/")
+
+            # Send 'started' event for this file
+            started_evt = {
+                "event": "file_started",
+                "fileName": filename,
+                "fileSize": details_data.get("size", 0),
+            }
+            yield (json.dumps(started_evt) + "\n").encode("utf-8")
+
+            try:
+                # If ingest_unstructured_file is blocking, run in thread
+                result_success = await asyncio.to_thread(
+                    ingest_unstructured_file,
+                    file_path=full_filepath,
+                    category=subdomain,
+                    reference=publishing_authority,
+                    url=source_url,
+                )
+
+                # Compose success message (safe-serialize ingestion details)
+                success_evt = {
+                    "event": "file_result",
+                    "fileName": filename,
+                    "status": "success",
+                    "ingestionDetails": getattr(result_success, "ingestionDetails", None),
+                }
+                ingestion_results.append({
+                    "fileName": filename,
+                    "fileSize": details_data.get("size", 0),
+                    "status": "success",
+                    "ingestionDetails": success_evt["ingestionDetails"],
+                })
+                yield (json.dumps(success_evt) + "\n").encode("utf-8")
+
+            except ImportError as ie:
+                error_msg = "fpdf missing: pip install fpdf"
+                error_evt = {
+                    "event": "file_result",
+                    "fileName": filename,
+                    "status": "failed",
+                    "error": error_msg,
+                }
+                ingestion_results.append({
+                    "fileName": filename,
+                    "fileSize": details_data.get("size", 0),
+                    "status": "failed",
+                    "error": error_msg,
+                })
+                yield (json.dumps(error_evt) + "\n").encode("utf-8")
+
+            except Exception as e:
+                # Send failure event
+                err = str(e)
+                error_evt = {
+                    "event": "file_result",
+                    "fileName": filename,
+                    "status": "failed",
+                    "error": err,
+                }
+                ingestion_results.append({
+                    "fileName": filename,
+                    "fileSize": details_data.get("size", 0),
+                    "status": "failed",
+                    "error": err,
+                })
+                yield (json.dumps(error_evt) + "\n").encode("utf-8")
+
+            # Cleanup files (same as before)
+            try:
+                if full_filepath and os.path.exists(full_filepath):
+                    os.remove(full_filepath)
+                if filename:
+                    filename_without_ext, _ = os.path.splitext(str(filename))
+                    md_filepath = os.path.join(MARKDOWN_DIRECTORY, f"{filename_without_ext}.md")
+                    if os.path.exists(md_filepath):
+                        os.remove(md_filepath)
+            except Exception:
+                # don't break stream on cleanup problems; notify optionally
+                pass
+
+            processed_count += 1
+            # Optionally send progress event
+            progress_evt = {
+                "event": "progress",
+                "processed": processed_count,
+                "total": total,
+                "percent": round(processed_count / total * 100, 2),
+            }
+            yield (json.dumps(progress_evt) + "\n").encode("utf-8")
+
+            # yield control to event loop so client sees incremental data
+            await asyncio.sleep(0)
+
+        # final completion event with aggregated results
+        complete_evt = {"event": "complete", "results": ingestion_results}
+        yield (json.dumps(complete_evt) + "\n").encode("utf-8")
+
+    # NDJSON streaming — client will parse one JSON object per line
+    return StreamingResponse(generator(), media_type="application/x-ndjson")
+

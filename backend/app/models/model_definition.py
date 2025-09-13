@@ -31,7 +31,6 @@ DownloadResult = Union[DownloadSuccess, DownloadError]
 class QualityMetrics(BaseModel):
     """Defines the structure for data quality metrics."""
     parseAccuracy: float
-    complexity: float
 
 class AnalysisResult(BaseModel):
     """
@@ -48,12 +47,14 @@ class AnalysisResult(BaseModel):
     brief_summary: Optional[str] = None
     document_size: Optional[str] = None
     extra_fields: Dict[str, Any] = {}
+    quality_score: Optional[Union[float, int]] = None
     error: Optional[str] = None
 
 class FileProcessingResult(BaseModel):
     """
     Defines the final response structure for each processed file.
     """
+    fileId: str
     fileName: str
     qualityMetrics: QualityMetrics
     analysis: AnalysisResult
@@ -82,6 +83,7 @@ IngestionDetails = Union[UnstructuredIngestionDetails]
 class FileIngestionResult(BaseModel):
     """Represents the result of processing a single file."""
     fileName: str
+    fileId: str
     fileSize: int
     status: Literal["success", "failed"]
     ingestionDetails: Optional[Union[IngestionDetails, List[IngestionDetails]]] = None

@@ -149,47 +149,61 @@ export default function FileSelection({ files, setFiles, onUploadComplete }: Fil
     });
 
     try {
-      let uploadedFileResults: any[] = [];
+        let uploadedFileResults: any[] = [];
+        const localFilesToUpload = selectedFiles.filter(f => f.file && !f.uploaded);
+        
+        if (localFilesToUpload.length > 0) {
+            const formData = new FormData();
+            localFilesToUpload.forEach(fileData => {
+              if (fileData.file) {
+                formData.append("files", fileData.file, fileData.name);
+              }
+            });
+            
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+            const response = await fetch(`${apiUrl}/upload-files/`, {
+              method: 'POST',
+              body: formData,
+            });
 
-      // Step 1: Only make an API call if there are new files to upload
-      if (localFilesToUpload.length > 0) {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-        const response = await fetch(`${apiUrl}/upload-files/`, {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (!response.ok) {
-          throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+            if (!response.ok) {
+              throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+            }
+            const result = await response.json();
+            uploadedFileResults = result.files;
         }
-        const result = await response.json();
-        console.log('Upload successful:', result);
-        uploadedFileResults = result.files;
-      }
 
-      // This map contains the final server paths for the files we just uploaded.
-      const serverFileMap = new Map(uploadedFileResults.map((f: any) => [f.name, f.path]));
+        const serverFileMap = new Map(
+            uploadedFileResults.map((f: { id: string; name: string; path: string; }) => [f.name, f])
+        );
 
-      // Step 2: Update state to create a consistent FileData structure
-      setFiles(prevFiles =>
-        prevFiles.map(pf => {
-          if (serverFileMap.has(pf.name)) {
-            return { ...pf, path: serverFileMap.get(pf.name)!, uploaded: true };
-          }
-          if (serverFileNames.has(pf.name)) {
-            return { ...pf, uploaded: true };
-          }
-          return pf;
-        })
-      );
+        const serverFileNames = new Set(selectedFiles.filter(f => !f.file || f.uploaded).map(f => f.name));
+        
+        setFiles(prevFiles =>
+            prevFiles.map(pf => {
+                if (serverFileMap.has(pf.name)) {
+                    const serverData = serverFileMap.get(pf.name)!;
+                    return { 
+                        ...pf, 
+                        id: serverData.id,
+                        path: serverData.path, 
+                        uploaded: true 
+                    };
+                }
+
+                if (serverFileNames.has(pf.name)) {
+                    return { ...pf, uploaded: true };
+                }
+                return pf;
+            })
+        );
       
-      onUploadComplete();
+        onUploadComplete();
 
     } catch (error) {
-      console.error('Failed to upload files:', error);
-      alert(`An error occurred during upload: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error('Failed to upload files:', error);
     } finally {
-      setIsUploading(false);
+        setIsUploading(false);
     }
   };
 

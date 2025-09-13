@@ -35,14 +35,14 @@ export default function FileSelectionForIngestion({ files, setFiles }: FileSelec
   const getQualityScore = (file: FileData) => {
     if (!file.qualityMetrics) return 0
     return (
-      (file.qualityMetrics.parseAccuracy + file.qualityMetrics.complexity) / 2
+      (file.qualityMetrics.parseAccuracy)
     )
   }
 
   const filteredAndSortedFiles = processedFiles
     .filter((file) => {
       const matchesSearch = file.name.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesFilter = filterType === "all" || file.classification === filterType
+      const matchesFilter = filterType === "all"
       return matchesSearch && matchesFilter
     })
     .sort((a, b) => {
@@ -52,10 +52,6 @@ export default function FileSelectionForIngestion({ files, setFiles }: FileSelec
         case "name":
           aValue = a.name
           bValue = b.name
-          break
-        case "type":
-          aValue = a.classification || ""
-          bValue = b.classification || ""
           break
         case "quality":
           aValue = getQualityScore(a)
@@ -211,12 +207,6 @@ export default function FileSelectionForIngestion({ files, setFiles }: FileSelec
             <TableBody>
               {filteredAndSortedFiles.map((file) => {
                 const qualityScore = getQualityScore(file)
-                const targetDb =
-                  file.classification === "Structured"
-                    ? "PostgreSQL"
-                    : file.classification === "Semi-Structured"
-                      ? "PostgreSQL + Vector DB"
-                      : "Vector DB"
 
                 return (
                   <TableRow key={file.id}>

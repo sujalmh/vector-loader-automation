@@ -39,6 +39,7 @@ export type AnalysisData = {
 
 export type FileData = {
   id: string
+  fileData: string
   name: string
   path: string
   size: number
@@ -49,7 +50,6 @@ export type FileData = {
   uploaded?: boolean // New: Track upload status per file
   qualityMetrics?: {
     parseAccuracy: number
-    complexity: number
   }
   ingestionStatus?: "pending" | "success" | "failed"
   ingestionDetails?: IngestionDetails
