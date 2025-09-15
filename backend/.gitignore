@@ -11,3 +11,5 @@ markdown_output/
 uploaded_files/
 temp_output/
 data/
+__pycache__/
+*.pyc
