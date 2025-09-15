@@ -64,7 +64,7 @@ else:
 # Ensure index exists
 if not collection.indexes:
     index_params = {
-        "metric_type": "COSINE",
+        "metric_type": "IP",
         "index_type": "HNSW",
         "params": {"M": 16, "efConstruction": 200}
     }
