@@ -27,9 +27,10 @@ load_dotenv()
 MISTRAL_OCR_KEY = os.getenv("MISTRAL_OCR_KEY")
 client = Mistral(api_key=MISTRAL_OCR_KEY)
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
+MILVUS_PORT = int(os.getenv("MILVUS_PORT", 19530))
 
 # Connect to Milvus
-conn = connections.connect(host=MILVUS_HOST, port=19530)
+conn = connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
 db_name = 'test_db'
 if db_name not in db.list_database():
     db.create_database(db_name)
