@@ -34,7 +34,6 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  BookOpen,
   Eye,
 } from "lucide-react";
 import type { FileData, AnalysisData } from "@/app/page";
@@ -68,32 +67,16 @@ export default function FileProcessing({
     useState<FileData | null>(null);
 
   const selectedFiles = files.filter((f) => f.selected);
+  const failedFiles = selectedFiles.filter((f) => f.processed && f.error);
 
-  // Replace your existing startProcessing with this function
-  const startProcessing = async () => {
+  const processFiles = async (filesToProcess: FileData[]) => {
+    if (filesToProcess.length === 0) return;
+
     setIsProcessing(true);
-    setProgress(0);
     setError(null);
-    setProcessedFileCount(0);
-
-    // Reset selected files state
-    setFiles((prevFiles) =>
-      prevFiles.map((f) =>
-        f.selected
-          ? {
-              ...f,
-              processed: false,
-              qualityMetrics: undefined,
-              analysis: undefined,
-              error: undefined,
-            }
-          : f
-      )
-    );
 
     const formData = new FormData();
-    const selected = files.filter((f) => f.selected);
-    selected.forEach((file) => {
+    filesToProcess.forEach((file) => {
       if (file.file) {
         formData.append("files", file.file);
         formData.append("file_ids", file.id);
@@ -120,9 +103,7 @@ export default function FileProcessing({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let processedCount = 0;
 
-      // SSE data: blocks regex
       const dataBlockRegex = /(?:^|\n)data:\s*((?:.|\n)*?)(?=\n\n|$)/g;
 
       while (true) {
@@ -156,15 +137,9 @@ export default function FileProcessing({
               analysis = analysis.json;
             }
 
-            const parseAccuracy =
-              (analysis && (analysis.quality_score ?? analysis.quality)) ??
-              undefined;
-            const qualityMetrics =
-              typeof parseAccuracy === "number" ? { parseAccuracy } : undefined;
-
             setFiles((prevFiles) => {
               const updated = prevFiles.map((f) => {
-                if (f.id === fileId && !f.processed) {
+                if (f.id === fileId) {
                   const parseAccuracy =
                     (analysis &&
                       (analysis.quality_score ?? analysis.quality)) ??
@@ -190,7 +165,7 @@ export default function FileProcessing({
               ).length;
               setProcessedFileCount(processedSoFar);
               setProgress(
-                (processedSoFar / Math.max(1, selected.length)) * 100
+                (processedSoFar / Math.max(1, selectedFiles.length)) * 100
               );
 
               return updated;
@@ -198,49 +173,59 @@ export default function FileProcessing({
           } catch (err) {
             console.error("Failed to parse SSE JSON:", rawData, err);
           }
-        } // end while matches
-
-        // keep leftover
+        }
         buffer = buffer.slice(lastIndex);
-      } // end stream loop
-
-      // close reader
-      try {
-        await reader.cancel();
-      } catch (e) {
-        // ignore
       }
-
-      // final progress
-      if (processedCount === selected.length) {
-        setProgress(100);
-      } else {
-        setProgress((processedCount / Math.max(1, selected.length)) * 100);
-      }
+      await reader.cancel().catch(() => {});
     } catch (err: any) {
       console.error("Processing error:", err);
       setError(
         err.message || "An unknown error occurred. Is the backend running?"
       );
-      setProgress(0);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const resetProcessing = () => {
-    setFiles((prevFiles) =>
-      prevFiles.map((f) => ({
-        ...f,
-        processed: false,
-        qualityMetrics: undefined,
-        classification: undefined,
-        analysis: undefined,
-      }))
-    );
+  const startProcessing = async () => {
     setProgress(0);
-    setError(null);
     setProcessedFileCount(0);
+    setFiles((prevFiles) =>
+      prevFiles.map((f) =>
+        f.selected
+          ? {
+              ...f,
+              processed: false,
+              qualityMetrics: undefined,
+              analysis: undefined,
+              error: undefined,
+            }
+          : f
+      )
+    );
+    // Allow state to update before starting the process
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await processFiles(selectedFiles);
+  };
+
+  const retryFailedProcessing = async () => {
+    const failedFileIds = failedFiles.map((f) => f.id);
+    setFiles((prevFiles) =>
+      prevFiles.map((f) =>
+        failedFileIds.includes(f.id)
+          ? {
+              ...f,
+              processed: false,
+              qualityMetrics: undefined,
+              analysis: undefined,
+              error: undefined,
+            }
+          : f
+      )
+    );
+    // Allow state to update before starting the process
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await processFiles(failedFiles);
   };
 
   // --- Helper functions for rendering ---
@@ -259,7 +244,11 @@ export default function FileProcessing({
 
   const getFileStatus = (file: FileData) => {
     if (file.processed) {
-      return <CheckCircle className="w-5 h-5 text-green-500" />;
+      return file.error ? (
+        <AlertCircle className="w-5 h-5 text-red-500" />
+      ) : (
+        <CheckCircle className="w-5 h-5 text-green-500" />
+      );
     }
     if (isProcessing && file.selected) {
       return <Clock className="w-5 h-5 text-blue-500 animate-spin" />;
@@ -267,7 +256,6 @@ export default function FileProcessing({
     return <div className="w-5 h-5 rounded-full border-2 border-gray-300" />;
   };
 
-  // Helper component to render each detail item in the modal
   const DetailItem = ({
     label,
     value,
@@ -316,12 +304,12 @@ export default function FileProcessing({
               </Button>
               <Button
                 variant="outline"
-                onClick={resetProcessing}
-                disabled={isProcessing}
-                className="flex items-center gap-2 bg-transparent"
+                onClick={retryFailedProcessing}
+                disabled={isProcessing || failedFiles.length === 0}
+                className="flex items-center gap-2"
               >
                 <RotateCcw className="w-4 h-4" />
-                Reset
+                Retry Failed ({failedFiles.length})
               </Button>
             </div>
             <div className="flex-1 w-full">
@@ -343,7 +331,7 @@ export default function FileProcessing({
           <div className="text-sm text-gray-600 mt-2">
             Status:{" "}
             {isProcessing
-              ? "Sending files to server..."
+              ? "Processing files on server..."
               : `${processedFileCount} of ${selectedFiles.length} files processed.`}
           </div>
         </CardContent>
@@ -374,7 +362,13 @@ export default function FileProcessing({
                 {selectedFiles.map((file) => (
                   <TableRow
                     key={file.id}
-                    className={file.processed ? "bg-green-50/50" : ""}
+                    className={
+                      file.processed
+                        ? file.error
+                          ? "bg-red-50/50"
+                          : "bg-green-50/50"
+                        : ""
+                    }
                   >
                     <TableCell>{getFileStatus(file)}</TableCell>
                     <TableCell className="font-medium">
@@ -384,7 +378,9 @@ export default function FileProcessing({
                       </div>
                     </TableCell>
                     <TableCell>
-                      {file.qualityMetrics ? (
+                      {file.error ? (
+                        <Badge variant="destructive">Failed</Badge>
+                      ) : file.qualityMetrics ? (
                         <div className="flex items-center gap-2">
                           <span>{file.qualityMetrics.parseAccuracy}/3</span>
                           {getQualityBadge(file.qualityMetrics.parseAccuracy)}
@@ -402,42 +398,35 @@ export default function FileProcessing({
                         <Badge variant="outline">{file.analysis.domain}</Badge>
                       ) : (
                         <span className="text-gray-400">
-                          {isProcessing && file.selected
-                            ? "Analyzing..."
-                            : "Pending"}
+                          {isProcessing && file.selected ? "..." : "Pending"}
                         </span>
                       )}
                     </TableCell>
                     <TableCell>
-                      {file.analysis?.domain ? (
+                      {file.analysis?.subdomain ? (
                         <Badge variant="outline">
                           {file.analysis.subdomain}
                         </Badge>
                       ) : (
                         <span className="text-gray-400">
-                          {isProcessing && file.selected
-                            ? "Analyzing..."
-                            : "Pending"}
+                          {isProcessing && file.selected ? "..." : "Pending"}
                         </span>
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-gray-600 max-w-xs">
                       <div className="flex flex-wrap gap-1">
-                        {file.analysis?.intents && (
-                          <>
-                            {Array.isArray(file.analysis.intents) ? (
-                              file.analysis.intents.map((intent, idx) => (
-                                <Badge key={idx} variant="default">
-                                  {intent}
-                                </Badge>
-                              ))
-                            ) : (
-                              <Badge variant="default">
-                                {file.analysis.intents}
+                        {file.analysis?.intents &&
+                          (Array.isArray(file.analysis.intents) ? (
+                            file.analysis.intents.map((intent, idx) => (
+                              <Badge key={idx} variant="default">
+                                {intent}
                               </Badge>
-                            )}
-                          </>
-                        )}
+                            ))
+                          ) : (
+                            <Badge variant="default">
+                              {file.analysis.intents}
+                            </Badge>
+                          ))}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
@@ -480,6 +469,17 @@ export default function FileProcessing({
 
             <div className="text-sm">
               <dl>
+                {/* Display file-specific error in modal */}
+                {selectedFileForDetails.error && (
+                  <DetailItem
+                    label="Processing Error"
+                    value={
+                      <div className="text-red-600 p-2 bg-red-50 rounded-md">
+                        {selectedFileForDetails.error}
+                      </div>
+                    }
+                  />
+                )}
                 <DetailItem
                   label="Brief Summary"
                   value={selectedFileForDetails.analysis.brief_summary}
@@ -512,35 +512,29 @@ export default function FileProcessing({
                   label="Document Size"
                   value={selectedFileForDetails.size}
                 />
-
                 <DetailItem
                   label="Intents"
                   value={
                     <div className="flex flex-wrap gap-1">
-                      {selectedFileForDetails.analysis.intents && (
-                        <>
-                          {Array.isArray(
-                            selectedFileForDetails.analysis.intents
-                          ) ? (
-                            selectedFileForDetails.analysis.intents.map(
-                              (intent, idx) => (
-                                <Badge key={idx} variant="default">
-                                  {intent}
-                                </Badge>
-                              )
+                      {selectedFileForDetails.analysis.intents &&
+                        (Array.isArray(
+                          selectedFileForDetails.analysis.intents
+                        ) ? (
+                          selectedFileForDetails.analysis.intents.map(
+                            (intent, idx) => (
+                              <Badge key={idx} variant="default">
+                                {intent}
+                              </Badge>
                             )
-                          ) : (
-                            <Badge variant="default">
-                              {selectedFileForDetails.analysis.intents}
-                            </Badge>
-                          )}
-                        </>
-                      )}
+                          )
+                        ) : (
+                          <Badge variant="default">
+                            {selectedFileForDetails.analysis.intents}
+                          </Badge>
+                        ))}
                     </div>
                   }
                 />
-
-                {/* Render extra_fields if they exist */}
                 {selectedFileForDetails.analysis.extra_fields &&
                   Object.entries(
                     selectedFileForDetails.analysis.extra_fields
@@ -557,18 +551,6 @@ export default function FileProcessing({
                       }
                     />
                   ))}
-
-                {/* Display error if one occurred during analysis for this specific file */}
-                {selectedFileForDetails.analysis.error && (
-                  <DetailItem
-                    label="Analysis Error"
-                    value={
-                      <div className="text-red-600 p-2 bg-red-50 rounded-md">
-                        {selectedFileForDetails.analysis.error}
-                      </div>
-                    }
-                  />
-                )}
               </dl>
             </div>
 

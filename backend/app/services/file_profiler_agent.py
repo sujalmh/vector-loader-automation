@@ -248,18 +248,22 @@ class FileAnalyzer:
             A dictionary containing the analysis result or an error message.
         """
         p = Path(file_path)
+        print(p)
         if not p.is_file() or p.suffix.lower() not in SUPPORTED_EXTS:
+            print(f"File does not exist or is not a supported type: {file_path}")
             return {"error": "File does not exist or is not a supported type.", "file_path": file_path}
 
         # 1. Extract text
+        print(f"Extracting text from {file_path}")
         extracted_text, err = self._extract_text(p)
         if err:
             return {"error": f"Extraction failed: {err}", "file_path": file_path}
 
         # 2. Throttle and Analyze
+        print(f"Analyzing {file_path}")
         self._throttle(max_rpm)
         analysis_result = self._classify_with_llm(extracted_text, p.name, text_limit)
-
+        print(analysis_result)
         # 3. Store results in DB for tracking
         conn = self.get_db_pool().getconn()
         try:

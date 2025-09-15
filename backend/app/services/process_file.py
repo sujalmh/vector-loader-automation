@@ -9,6 +9,7 @@ async def process_pdf(file_path: str) -> Dict[str, Any]:
     analyzer in a separate thread.
     """
     try:
+        print(f"Processing {file_path}")
         analyzer_instance = FileAnalyzer()
 
         analysis = await asyncio.to_thread(

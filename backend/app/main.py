@@ -135,6 +135,7 @@ async def _process_saved_files(saved_files: List[Dict[str, str]]) -> AsyncGenera
         file_name = file_info["original_name"]
 
         try:
+            print(file_info)
             processing_result = await process_pdf(file_path)
 
             if not processing_result or "analysis" not in processing_result:
@@ -246,6 +247,7 @@ async def start_ingestion_process(
                 # --- CORRECTED LOGIC ---
                 # 1. Call the ingestion function, which returns a complete result object
                 analysis = details_data.get("analysis", {})
+                print(details_data)
                 ingestion_result_obj = ingest_unstructured_file(
                     file_path=full_filepath,
                     category=analysis.get("subdomain"),
