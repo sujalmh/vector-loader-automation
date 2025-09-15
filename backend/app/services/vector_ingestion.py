@@ -31,39 +31,46 @@ MILVUS_PORT = int(os.getenv("MILVUS_PORT", 19530))
 
 # Connect to Milvus
 conn = connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
-db_name = 'test_db'
+
+db_name = "test_db"
 if db_name not in db.list_database():
     db.create_database(db_name)
 db.using_database(db_name)
 
-# Define schema and collection for Milvus
-collection_name = 'vector_ingestion'
-if not utility.has_collection(collection_name):
-    id_field = FieldSchema(name='id', dtype=DataType.INT64, is_primary=True, auto_id=True)
-    source_field = FieldSchema(name='source', dtype=DataType.VARCHAR, max_length=255)
-    page_field = FieldSchema(name='page', dtype=DataType.INT64)
-    category_field = FieldSchema(name='category', dtype=DataType.VARCHAR, max_length=50)
-    embedding_field = FieldSchema(name='embeddings', dtype=DataType.FLOAT_VECTOR, dim=768)
-    content_field = FieldSchema(name='content', dtype=DataType.VARCHAR, max_length=8192)
-    reference_field = FieldSchema(name='reference', dtype=DataType.VARCHAR, max_length=255)
-    date_field = FieldSchema(name='date', dtype=DataType.VARCHAR, max_length=50)
-    url_field = FieldSchema(name='url', dtype=DataType.VARCHAR, max_length=1000)
+collection_name = "vector_ingestion"
 
-    schema = CollectionSchema(fields=[
-        id_field, source_field, page_field, category_field,
-        embedding_field, content_field, reference_field, date_field, url_field
-    ])
+if not utility.has_collection(collection_name):
+    # Define schema
+    id_field = FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True)
+    source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=255)
+    page_field = FieldSchema(name="page", dtype=DataType.INT64)
+    category_field = FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=50)
+    embedding_field = FieldSchema(name="embeddings", dtype=DataType.FLOAT_VECTOR, dim=768)
+    content_field = FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=8192)
+    reference_field = FieldSchema(name="reference", dtype=DataType.VARCHAR, max_length=255)
+    date_field = FieldSchema(name="date", dtype=DataType.VARCHAR, max_length=50)
+    url_field = FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=1000)
+
+    schema = CollectionSchema(
+        fields=[id_field, source_field, page_field, category_field,
+                embedding_field, content_field, reference_field,
+                date_field, url_field]
+    )
     collection = Collection(name=collection_name, schema=schema)
 
-    index_params = {
-        'metric_type': 'COSINE',
-        'index_type': 'HNSW',
-        'params': {'M': 16, 'efConstruction': 200}
-    }
-    collection.create_index(field_name='embeddings', index_params=index_params)
 else:
     collection = Collection(name=collection_name)
 
+# Ensure index exists
+if not collection.indexes:
+    index_params = {
+        "metric_type": "COSINE",
+        "index_type": "HNSW",
+        "params": {"M": 16, "efConstruction": 200}
+    }
+    collection.create_index(field_name="embeddings", index_params=index_params)
+
+# Always load before search
 collection.load()
 
 # Load Sentence Transformer model
