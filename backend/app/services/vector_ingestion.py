@@ -81,6 +81,8 @@ embedding_model = SentenceTransformer(embedding_model_name, trust_remote_code=Tr
 # 3. Helper Functions
 # ==============================================================================
 
+from datetime import datetime
+
 def to_yyyymm(date_str: str) -> str | None:
     for fmt in ("%b %Y", "%B %Y"):
         try:
@@ -88,11 +90,20 @@ def to_yyyymm(date_str: str) -> str | None:
             return dt.strftime("%Y%m")
         except ValueError:
             continue
+
     try:
         dt = datetime.strptime(date_str, "%Y")
         return dt.strftime("%Y") + "01"
     except ValueError:
         pass
+
+    if "-" in date_str:
+        parts = date_str.split("-")
+        if len(parts) == 2 and all(p.isdigit() for p in parts):
+            start_year = int(parts[0])
+            end_year = int(parts[1]) if len(parts[1]) == 4 else int(parts[0][:2] + parts[1])
+            return f"{start_year}04"  
+
     return "202501"
 
 
