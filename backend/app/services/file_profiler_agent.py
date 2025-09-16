@@ -198,7 +198,7 @@ class FileAnalyzer:
         - domain: broad domain (e.g., Finance, Healthcare, Legal)
         - subdomain: short tag
         - intents: Specific intents (e.g., India GST Collections, State of Assam econometrics)
-        - publishing_authority: Publishing organization or committee
+        - publishing_authority: Publishing organization or committee, (e.g. Inflation Expectations Survey of Households March 2019, Monetary Policy Report April 2018)
         - published_date: Fiscal year or month of reference, format Month YYYY or YYYY
         - period_of_reference: Date range within the document
         - brief_summary: A concise summary (<= 3 sentences)
