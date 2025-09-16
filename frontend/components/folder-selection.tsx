@@ -95,6 +95,7 @@ export default function FileSelection({
 
       const results: Array<{
         status: "success" | "error";
+        id: string;
         url: string;
         data?: {
           name: string;
@@ -122,7 +123,7 @@ export default function FileSelection({
           });
 
           const fileData: FileData = {
-            id: `${result.data.name}-${result.data.size}-${result.url}`,
+            id: result.id,
             name: result.data.name,
             path: result.data.path,
             size: result.data.size,
@@ -131,12 +132,13 @@ export default function FileSelection({
             processed: false,
             uploaded: true,
             file: fileObject,
-            sourceUrl: new URL(result.url).hostname, // Set source URL to the main domain
+            sourceUrl: new URL(result.url).toString(), // Set source URL to the main domain
           };
 
           downloadedFiles.push(fileData);
         }
       }
+      console.log("Downloaded files:", downloadedFiles);
 
       setFiles((prevFiles) => {
         const existingIds = new Set(prevFiles.map((f) => f.id));

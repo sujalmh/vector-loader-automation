@@ -244,6 +244,9 @@ export default function IngestionProcess({
     (f) => f.ingestionStatus === "pending"
   ).length;
 
+  const allFilesIngested =
+    selectedFiles.length > 0 && successCount === selectedFiles.length;
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -265,11 +268,17 @@ export default function IngestionProcess({
           <div className="flex items-center gap-4 mb-4">
             <Button
               onClick={startIngestion}
-              disabled={isIngesting || selectedFiles.length === 0}
+              disabled={
+                isIngesting || selectedFiles.length === 0 || allFilesIngested
+              }
               className="flex items-center gap-2"
             >
               <Play className="w-4 h-4" />
-              {isIngesting ? "Ingesting..." : "Start Ingestion"}
+              {isIngesting
+                ? "Ingesting...."
+                : allFilesIngested
+                ? "Completed"
+                : "Start Ingestion"}
             </Button>
 
             {failedCount > 0 && !isIngesting && (

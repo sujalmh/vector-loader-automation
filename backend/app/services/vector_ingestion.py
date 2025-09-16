@@ -64,7 +64,7 @@ else:
 # Ensure index exists
 if not collection.indexes:
     index_params = {
-        "metric_type": "IP",
+        "metric_type": "COSINE",
         "index_type": "HNSW",
         "params": {"M": 16, "efConstruction": 200}
     }
@@ -80,6 +80,21 @@ embedding_model = SentenceTransformer(embedding_model_name, trust_remote_code=Tr
 # ==============================================================================
 # 3. Helper Functions
 # ==============================================================================
+
+def to_yyyymm(date_str: str) -> str | None:
+    for fmt in ("%b %Y", "%B %Y"):
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            return dt.strftime("%Y%m")
+        except ValueError:
+            continue
+    try:
+        dt = datetime.strptime(date_str, "%Y")
+        return dt.strftime("%Y") + "01"
+    except ValueError:
+        pass
+    return None
+
 
 def split_pdf_if_large(file_path, max_size_mb=50, max_pages_per_part=20):
     if os.path.getsize(file_path) / (1024 * 1024) <= max_size_mb:
@@ -229,7 +244,8 @@ def ingest_unstructured_file(
     category: str,
     reference: str,
     url: str,
-    fileId: str
+    fileId: str,
+    published_date: str
 ) -> FileIngestionResult:
     """
     Main function to handle the ingestion of a single unstructured file.
@@ -256,7 +272,8 @@ def ingest_unstructured_file(
 
     try:
         # 1. Extract date from reference metadata
-        date_str = extract_date_from_reference(reference)
+        print(published_date)
+        date_str = to_yyyymm(published_date) 
         
         # 2. Split PDF if it's too large for the OCR API
         split_files = split_pdf_if_large(file_path)

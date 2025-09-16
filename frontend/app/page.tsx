@@ -38,7 +38,7 @@ export type AnalysisData = {
 
 export type FileData = {
   id: string;
-  fileData: string;
+  fileData?: string;
   name: string;
   path: string;
   size: number;

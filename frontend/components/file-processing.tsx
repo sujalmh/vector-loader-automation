@@ -68,6 +68,8 @@ export default function FileProcessing({
 
   const selectedFiles = files.filter((f) => f.selected);
   const failedFiles = selectedFiles.filter((f) => f.processed && f.error);
+  const allFilesProcessed =
+    selectedFiles.length > 0 && selectedFiles.every((f) => f.processed);
 
   const processFiles = async (filesToProcess: FileData[]) => {
     if (filesToProcess.length === 0) return;
@@ -296,11 +298,19 @@ export default function FileProcessing({
             <div className="flex items-center gap-4">
               <Button
                 onClick={startProcessing}
-                disabled={isProcessing || selectedFiles.length === 0}
+                disabled={
+                  isProcessing ||
+                  selectedFiles.length === 0 ||
+                  allFilesProcessed
+                }
                 className="flex items-center gap-2 w-40"
               >
                 <Play className="w-4 h-4" />
-                {isProcessing ? "Processing..." : "Start Processing"}
+                {isProcessing
+                  ? "Processing..."
+                  : allFilesProcessed
+                  ? "Completed"
+                  : "Start Processing"}
               </Button>
               <Button
                 variant="outline"

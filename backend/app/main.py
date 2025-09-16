@@ -242,7 +242,7 @@ async def start_ingestion_process(
                 continue
 
             full_filepath = details_data.get("path")
-            
+
             try:
                 # --- CORRECTED LOGIC ---
                 # 1. Call the ingestion function, which returns a complete result object
@@ -253,7 +253,8 @@ async def start_ingestion_process(
                     category=analysis.get("subdomain"),
                     reference=analysis.get("publishing_authority"),
                     url=details_data.get("sourceUrl") or "https://www.epfindia.gov.in/",
-                    fileId = details_data.get("id")
+                    fileId = details_data.get("id"),
+                    published_date = analysis.get("published_date")
                 )
                 
                 # 2. Convert the entire Pydantic result object to a dictionary
@@ -277,13 +278,16 @@ async def start_ingestion_process(
                 }
             
             finally:
-                # --- File cleanup runs regardless of the outcome ---
-                if os.path.exists(full_filepath):
-                    os.remove(full_filepath)
-                filename_without_ext, _ = os.path.splitext(str(filename))
-                md_filepath = os.path.join(MARKDOWN_DIRECTORY, str(filename_without_ext) + '.md')
-                if os.path.exists(md_filepath):
-                    os.remove(md_filepath)
+                # --- Corrected File Cleanup Logic ---
+                # Only remove the file if the status is not 'failed'
+                if result_payload.get("status") != "failed":
+                    if os.path.exists(full_filepath):
+                        os.remove(full_filepath)
+                    filename_without_ext, _ = os.path.splitext(str(filename))
+                    md_filepath = os.path.join(MARKDOWN_DIRECTORY, str(filename_without_ext) + '.md')
+                    if os.path.exists(md_filepath):
+                        os.remove(md_filepath)
+                # If the status is 'failed', the file is intentionally left on the disk for a retry.
 
             # Yield the correctly formed result
             yield f"data: {json.dumps(result_payload)}\n\n"
@@ -291,13 +295,17 @@ async def start_ingestion_process(
 
     return StreamingResponse(ingestion_generator(), media_type="text/event-stream")
 
-
 async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> DownloadResult:
     try:
         parsed_path = urlparse(str(url)).path
         filename = os.path.basename(parsed_path)
         filename = unquote(filename) or "downloaded_file"
-        file_path = UPLOAD_DIRECTORY / filename
+        file_id = str(uuid.uuid4())
+        original_filename = filename or "unknown"
+        # Get the file extension (e.g., ".pdf", ".jpg")
+        suffix = Path(original_filename).suffix
+        unique_filename = f"{file_id}{suffix}"
+        file_path = UPLOAD_DIRECTORY / unique_filename
 
         async with client.stream("GET", str(url), follow_redirects=True, timeout=30.0) as response:
             response.raise_for_status()
@@ -314,6 +322,7 @@ async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> Dow
         encoded_file = base64.b64encode(file_bytes).decode("utf-8")
 
         return DownloadSuccess(
+            id=file_id,
             url=url,
             data=FileMetadata(
                 name=filename,
@@ -349,128 +358,128 @@ async def download_from_urls(request: UrlListRequest):
         return results
     
 
-@app.post("/ingest/stream")
-async def start_ingestion_stream(
-    files: List[UploadFile] = File(...),
-    file_details: str = Form(...),
-):
-    if not files:
-        raise HTTPException(status_code=400, detail="No files were provided for ingestion.")
+# @app.post("/ingest/stream")
+# async def start_ingestion_stream(
+#     files: List[UploadFile] = File(...),
+#     file_details: str = Form(...),
+# ):
+#     if not files:
+#         raise HTTPException(status_code=400, detail="No files were provided for ingestion.")
 
-    try:
-        details_list = json.loads(file_details)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_details.")
+#     try:
+#         details_list = json.loads(file_details)
+#     except json.JSONDecodeError:
+#         raise HTTPException(status_code=400, detail="Invalid JSON format for file_details.")
 
-    async def generator():
-        ingestion_results = []
-        total = len(details_list)
-        processed_count = 0
+#     async def generator():
+#         ingestion_results = []
+#         total = len(details_list)
+#         processed_count = 0
 
-        for details_data in details_list:
-            filename = details_data.get("name")
-            full_filepath = details_data.get("path")
-            analysis = details_data.get("analysis", {}) or {}
-            subdomain = analysis.get("subdomain")
-            publishing_authority = analysis.get("publishing_authority")
-            source_url = details_data.get("sourceUrl", "https://www.epfindia.gov.in/")
+#         for details_data in details_list:
+#             filename = details_data.get("name")
+#             full_filepath = details_data.get("path")
+#             analysis = details_data.get("analysis", {}) or {}
+#             subdomain = analysis.get("subdomain")
+#             publishing_authority = analysis.get("publishing_authority")
+#             source_url = details_data.get("sourceUrl", "https://www.epfindia.gov.in/")
 
-            # Send 'started' event for this file
-            started_evt = {
-                "event": "file_started",
-                "fileName": filename,
-                "fileSize": details_data.get("size", 0),
-            }
-            yield (json.dumps(started_evt) + "\n").encode("utf-8")
+#             # Send 'started' event for this file
+#             started_evt = {
+#                 "event": "file_started",
+#                 "fileName": filename,
+#                 "fileSize": details_data.get("size", 0),
+#             }
+#             yield (json.dumps(started_evt) + "\n").encode("utf-8")
 
-            try:
-                # If ingest_unstructured_file is blocking, run in thread
-                result_success = await asyncio.to_thread(
-                    ingest_unstructured_file,
-                    file_path=full_filepath,
-                    category=subdomain,
-                    reference=publishing_authority,
-                    url=source_url,
-                )
+#             try:
+#                 # If ingest_unstructured_file is blocking, run in thread
+#                 result_success = await asyncio.to_thread(
+#                     ingest_unstructured_file,
+#                     file_path=full_filepath,
+#                     category=subdomain,
+#                     reference=publishing_authority,
+#                     url=source_url,
+#                 )
 
-                # Compose success message (safe-serialize ingestion details)
-                success_evt = {
-                    "event": "file_result",
-                    "fileName": filename,
-                    "status": "success",
-                    "ingestionDetails": getattr(result_success, "ingestionDetails", None),
-                }
-                ingestion_results.append({
-                    "fileName": filename,
-                    "fileSize": details_data.get("size", 0),
-                    "status": "success",
-                    "ingestionDetails": success_evt["ingestionDetails"],
-                })
-                yield (json.dumps(success_evt) + "\n").encode("utf-8")
+#                 # Compose success message (safe-serialize ingestion details)
+#                 success_evt = {
+#                     "event": "file_result",
+#                     "fileName": filename,
+#                     "status": "success",
+#                     "ingestionDetails": getattr(result_success, "ingestionDetails", None),
+#                 }
+#                 ingestion_results.append({
+#                     "fileName": filename,
+#                     "fileSize": details_data.get("size", 0),
+#                     "status": "success",
+#                     "ingestionDetails": success_evt["ingestionDetails"],
+#                 })
+#                 yield (json.dumps(success_evt) + "\n").encode("utf-8")
 
-            except ImportError as ie:
-                error_msg = "fpdf missing: pip install fpdf"
-                error_evt = {
-                    "event": "file_result",
-                    "fileName": filename,
-                    "status": "failed",
-                    "error": error_msg,
-                }
-                ingestion_results.append({
-                    "fileName": filename,
-                    "fileSize": details_data.get("size", 0),
-                    "status": "failed",
-                    "error": error_msg,
-                })
-                yield (json.dumps(error_evt) + "\n").encode("utf-8")
+#             except ImportError as ie:
+#                 error_msg = "fpdf missing: pip install fpdf"
+#                 error_evt = {
+#                     "event": "file_result",
+#                     "fileName": filename,
+#                     "status": "failed",
+#                     "error": error_msg,
+#                 }
+#                 ingestion_results.append({
+#                     "fileName": filename,
+#                     "fileSize": details_data.get("size", 0),
+#                     "status": "failed",
+#                     "error": error_msg,
+#                 })
+#                 yield (json.dumps(error_evt) + "\n").encode("utf-8")
 
-            except Exception as e:
-                # Send failure event
-                err = str(e)
-                error_evt = {
-                    "event": "file_result",
-                    "fileName": filename,
-                    "status": "failed",
-                    "error": err,
-                }
-                ingestion_results.append({
-                    "fileName": filename,
-                    "fileSize": details_data.get("size", 0),
-                    "status": "failed",
-                    "error": err,
-                })
-                yield (json.dumps(error_evt) + "\n").encode("utf-8")
+#             except Exception as e:
+#                 # Send failure event
+#                 err = str(e)
+#                 error_evt = {
+#                     "event": "file_result",
+#                     "fileName": filename,
+#                     "status": "failed",
+#                     "error": err,
+#                 }
+#                 ingestion_results.append({
+#                     "fileName": filename,
+#                     "fileSize": details_data.get("size", 0),
+#                     "status": "failed",
+#                     "error": err,
+#                 })
+#                 yield (json.dumps(error_evt) + "\n").encode("utf-8")
 
-            # Cleanup files (same as before)
-            try:
-                if full_filepath and os.path.exists(full_filepath):
-                    os.remove(full_filepath)
-                if filename:
-                    filename_without_ext, _ = os.path.splitext(str(filename))
-                    md_filepath = os.path.join(MARKDOWN_DIRECTORY, f"{filename_without_ext}.md")
-                    if os.path.exists(md_filepath):
-                        os.remove(md_filepath)
-            except Exception:
-                # don't break stream on cleanup problems; notify optionally
-                pass
+#             # Cleanup files (same as before)
+#             try:
+#                 if full_filepath and os.path.exists(full_filepath):
+#                     os.remove(full_filepath)
+#                 if filename:
+#                     filename_without_ext, _ = os.path.splitext(str(filename))
+#                     md_filepath = os.path.join(MARKDOWN_DIRECTORY, f"{filename_without_ext}.md")
+#                     if os.path.exists(md_filepath):
+#                         os.remove(md_filepath)
+#             except Exception:
+#                 # don't break stream on cleanup problems; notify optionally
+#                 pass
 
-            processed_count += 1
-            # Optionally send progress event
-            progress_evt = {
-                "event": "progress",
-                "processed": processed_count,
-                "total": total,
-                "percent": round(processed_count / total * 100, 2),
-            }
-            yield (json.dumps(progress_evt) + "\n").encode("utf-8")
+#             processed_count += 1
+#             # Optionally send progress event
+#             progress_evt = {
+#                 "event": "progress",
+#                 "processed": processed_count,
+#                 "total": total,
+#                 "percent": round(processed_count / total * 100, 2),
+#             }
+#             yield (json.dumps(progress_evt) + "\n").encode("utf-8")
 
-            # yield control to event loop so client sees incremental data
-            await asyncio.sleep(0)
+#             # yield control to event loop so client sees incremental data
+#             await asyncio.sleep(0)
 
-        # final completion event with aggregated results
-        complete_evt = {"event": "complete", "results": ingestion_results}
-        yield (json.dumps(complete_evt) + "\n").encode("utf-8")
+#         # final completion event with aggregated results
+#         complete_evt = {"event": "complete", "results": ingestion_results}
+#         yield (json.dumps(complete_evt) + "\n").encode("utf-8")
 
-    # NDJSON streaming — client will parse one JSON object per line
-    return StreamingResponse(generator(), media_type="application/x-ndjson")
+#     # NDJSON streaming — client will parse one JSON object per line
+#     return StreamingResponse(generator(), media_type="application/x-ndjson")
 

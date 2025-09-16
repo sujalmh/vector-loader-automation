@@ -17,6 +17,7 @@ class FileMetadata(BaseModel):
 class DownloadSuccess(BaseModel):
     """Wrapper for a successful download result."""
     status: str = "success"
+    id: str
     url: HttpUrl
     data: FileMetadata
 
