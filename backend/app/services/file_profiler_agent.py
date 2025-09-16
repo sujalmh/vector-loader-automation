@@ -199,7 +199,7 @@ class FileAnalyzer:
         - subdomain: short tag
         - intents: Specific intents (e.g., India GST Collections, State of Assam econometrics)
         - publishing_authority: Publishing organization or committee
-        - published_date: Fiscal year or month of reference
+        - published_date: Fiscal year or month of reference, format Month YYYY or YYYY
         - period_of_reference: Date range within the document
         - brief_summary: A concise summary (<= 3 sentences)
         - quality_score: A file quality score out of 3, how well the file can be parsed (1-3)
