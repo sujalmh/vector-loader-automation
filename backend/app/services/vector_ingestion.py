@@ -93,7 +93,7 @@ def to_yyyymm(date_str: str) -> str | None:
         return dt.strftime("%Y") + "01"
     except ValueError:
         pass
-    return None
+    return "202501"
 
 
 def split_pdf_if_large(file_path, max_size_mb=50, max_pages_per_part=20):
