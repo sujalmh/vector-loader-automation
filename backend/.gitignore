@@ -6,6 +6,8 @@ venv_l/
 .env
 sql.db
 app/__pycache__/
+app/models/__pycache__/
+app/services/__pycache__/
 temp/
 markdown_output/
 uploaded_files/

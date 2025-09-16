@@ -11,8 +11,10 @@ from contextlib import asynccontextmanager
 from app.services.process_file import process_pdf
 from app.services.vector_ingestion import ingest_unstructured_file
 
-from app.models.model_definition import QualityMetrics, AnalysisResult, FileProcessingResult, FileIngestionResult, IngestionResponse, DownloadResult, UrlListRequest, FileMetadata, DownloadSuccess, DownloadError, ProcessingResult
+from app.models.model_definition import QualityMetrics, AnalysisResult, FileProcessingResult, FileIngestionResult, IngestionResponse, DownloadResult, UrlListRequest, FileMetadata, DownloadSuccess, DownloadError, DownloadDuplicate, ProcessingResult
+import app.models.db as db
 
+import hashlib
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Tuple, AsyncGenerator
@@ -40,10 +42,13 @@ async def lifespan(app: FastAPI):
     # --- Startup Event ---
     # Ensure the upload directory exists when the application starts.
     UPLOAD_DIRECTORY.mkdir(exist_ok=True)
+    await db.connect_db()
+    await db.init_db()
 
     yield
     # --- Shutdown Event ---
     # Add any cleanup tasks here if needed.
+    await db.disconnect_db() 
     print("Application shutdown complete.")
 
 # --- App Initialization ---
@@ -71,6 +76,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def calculate_sha256(content: bytes) -> str:
+    """Calculates the SHA-256 hash of the file content."""
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(content)
+    return sha256_hash.hexdigest()
+
+    
 # --- API Endpoints ---
 @app.post("/upload-files/", summary="Upload and Store Files Asynchronously")
 async def upload_and_store_files(files: List[UploadFile] = File(...)):
@@ -85,42 +97,63 @@ async def upload_and_store_files(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="No files were sent.")
 
     response_data = []
+    duplicates_data = []
 
     for file in files:
         try:
-            # 1. Generate a unique ID and secure filename
             file_id = str(uuid.uuid4())
             original_filename = file.filename or "unknown"
-            # Get the file extension (e.g., ".pdf", ".jpg")
             suffix = Path(original_filename).suffix
             unique_filename = f"{file_id}{suffix}"
             file_path = UPLOAD_DIRECTORY / unique_filename
 
-            # 2. Read and write the file content
             content = await file.read()
             async with aiofiles.open(file_path, "wb") as buffer:
                 await buffer.write(content)
 
-            # 3. Gather metadata, now including the unique ID
+            file_hash = calculate_sha256(content)
+            existing_file = await db.check_duplicate(file_hash)
+            if existing_file:
+                duplicates_data.append({
+                    "name": file.filename or "unknown",
+                    "message": "File is a duplicate of an existing record.",
+                    "existing_file_id": existing_file['file_id'],
+                    "existing_status": existing_file['status']
+                })
+                continue
+            
+            metadata = {
+                "id": file_id,
+                "name": original_filename,
+                "path": str(file_path.resolve()),
+                "size": len(content),
+                "type": file.content_type,
+                "source_url": "direct_upload"
+            }
+            
+            await db.log_initial_file(metadata, file_hash)
+
             response_data.append(
                 {
-                    "id": file_id, # <-- Add the unique ID here
-                    "name": original_filename, # Keep the original name for display
-                    "path": str(file_path.resolve()), # The new, unique server path
+                    "id": file_id,
+                    "name": original_filename,
+                    "path": str(file_path.resolve()),
                     "size": len(content),
                     "type": file.content_type,
                 }
             )
 
         except Exception as e:
+            print(f"Error processing file {file.filename}: {e}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Could not save file: {file.filename}. Error: {e}",
             )
     print(response_data)
     return {
-        "message": f"Successfully stored {len(response_data)} file(s).",
-        "files": response_data,
+        "message": f"Processed {len(files)} file(s). New: {len(response_data)}, Duplicates: {len(duplicates_data)}.",
+        "new_files": response_data,
+        "duplicates": duplicates_data,
     }
 
 
@@ -153,17 +186,23 @@ async def _process_saved_files(saved_files: List[Dict[str, str]]) -> AsyncGenera
             final_result = FileProcessingResult(
                 fileId=file_id,
                 fileName=os.path.basename(file_path),
-                qualityMetrics=QualityMetrics(parseAccuracy=analysis_result_model.quality_score),
+                qualityMetrics=QualityMetrics(parseAccuracy=analysis_result_model.quality_score if analysis_result_model.quality_score else 1),
                 analysis=analysis_result_model
             )
+            await db.log_analysis_result(file_id, final_result.model_dump())
+
             yield f"data: {final_result.model_dump_json()}\n\n"
 
         except Exception as e:
+            error_detail = f"Processing error: {e}"
+
             error_result = {
                 "fileId": file_id,
                 "fileName": os.path.basename(file_path),
                 "error": f"Processing error: {e}"
             }
+            await db.log_error(file_id, error_detail, status="ANALYSIS_FAILED")
+
             yield f"data: {json.dumps(error_result)}\n\n"
 
         finally:
@@ -236,18 +275,18 @@ async def start_ingestion_process(
     async def ingestion_generator():
         total_files = len(details_list)
         for i, details_data in enumerate(details_list):
-            print(i, details_data)
             filename = details_data.get("name")
             if not filename or filename not in uploaded_files_map:
                 continue
 
             full_filepath = details_data.get("path")
+            file_id = details_data.get("id") 
 
             try:
                 # --- CORRECTED LOGIC ---
                 # 1. Call the ingestion function, which returns a complete result object
                 analysis = details_data.get("analysis", {})
-                print(details_data)
+
                 ingestion_result_obj = ingest_unstructured_file(
                     file_path=full_filepath,
                     category=analysis.get("subdomain"),
@@ -257,12 +296,21 @@ async def start_ingestion_process(
                     published_date = analysis.get("published_date")
                 )
                 
-                # 2. Convert the entire Pydantic result object to a dictionary
-                # This correctly captures status, error, and ingestionDetails
                 result_payload = ingestion_result_obj.dict()
                 print(result_payload)
-                # 3. Add the progress, the only info unique to this loop
+
                 result_payload["progress"] = ((i + 1) / total_files) * 100
+                if result_payload.get("status") == "success":
+                    await db.log_ingestion_result(
+                        file_id, 
+                        result_payload.get("ingestionDetails")
+                    )
+                else: # Handle ingestion failure reported by the function
+                    await db.log_error(
+                        file_id, 
+                        result_payload.get("error", "Unknown ingestion error"), 
+                        status="INGESTION_FAILED"
+                    )
 
             except Exception as e:
                 # This is a fallback for unexpected errors that ingest_unstructured_file might not catch
@@ -276,6 +324,12 @@ async def start_ingestion_process(
                     "progress": ((i + 1) / total_files) * 100,
                     "ingestionDetails": None
                 }
+                error_detail = f"An unhandled exception occurred in the endpoint: {str(e)}"
+                result_payload["error"] = error_detail
+
+                if file_id:
+                    await db.log_error(file_id, error_detail, status="INGESTION_FAILED")
+
             
             finally:
                 # --- Corrected File Cleanup Logic ---
@@ -297,28 +351,51 @@ async def start_ingestion_process(
 
 async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> DownloadResult:
     try:
-        parsed_path = urlparse(str(url)).path
-        filename = os.path.basename(parsed_path)
-        filename = unquote(filename) or "downloaded_file"
-        file_id = str(uuid.uuid4())
-        original_filename = filename or "unknown"
-        # Get the file extension (e.g., ".pdf", ".jpg")
-        suffix = Path(original_filename).suffix
-        unique_filename = f"{file_id}{suffix}"
-        file_path = UPLOAD_DIRECTORY / unique_filename
-
+        # Step 1: Download the entire file content into memory
         async with client.stream("GET", str(url), follow_redirects=True, timeout=30.0) as response:
             response.raise_for_status()
+            file_bytes = await response.aread()
 
-            file_size = 0
-            file_bytes = b""
-            async with aiofiles.open(file_path, "wb") as buffer:
-                async for chunk in response.aiter_bytes():
-                    await buffer.write(chunk)
-                    file_bytes += chunk
-                    file_size += len(chunk)
+        # Step 2: Calculate the file's hash
+        file_hash = calculate_sha256(file_bytes)
 
-        # Encode the file as base64
+        # Step 3: DB-UPDATE: Check if the hash exists in the database
+        existing_file = await db.check_duplicate(file_hash)
+        if existing_file:
+            # If it's a duplicate, return the special duplicate response
+            return DownloadDuplicate(
+                url=url,
+                message="File is a duplicate of an existing record.",
+                existing_file_id=existing_file['file_id'],
+                existing_status=existing_file['status']
+            )
+
+        # Step 4: If not a duplicate, proceed to save and log the file
+        parsed_path = urlparse(str(url)).path
+        filename = unquote(os.path.basename(parsed_path) or "downloaded_file")
+        file_id = str(uuid.uuid4())
+        suffix = Path(filename).suffix
+        unique_filename = f"{file_id}{suffix}"
+        file_path = UPLOAD_DIRECTORY / unique_filename
+        
+        # Write the file from memory to disk
+        async with aiofiles.open(file_path, "wb") as buffer:
+            await buffer.write(file_bytes)
+        
+        file_size = len(file_bytes)
+        
+        # Log the new file record in the database
+        metadata_for_db = {
+            "id": file_id,
+            "name": filename,
+            "path": str(file_path.resolve()),
+            "size": file_size,
+            "type": suffix.lstrip('.').lower() if suffix else "unknown",
+            "source_url": str(url)
+        }
+        await db.log_initial_file(metadata_for_db, file_hash)
+
+        # Encode the file as base64 for the response
         encoded_file = base64.b64encode(file_bytes).decode("utf-8")
 
         return DownloadSuccess(
@@ -328,9 +405,9 @@ async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> Dow
                 name=filename,
                 path=str(file_path.resolve()),
                 size=file_size,
-                type=filename.split(".")[-1].lower() if "." in filename else "unknown",
+                type=metadata_for_db['type'],
                 source_url=str(url),
-                file_base64=encoded_file,  # 👈 add file content here
+                file_base64=encoded_file,
             ),
         )
 

@@ -21,13 +21,21 @@ class DownloadSuccess(BaseModel):
     url: HttpUrl
     data: FileMetadata
 
+class DownloadDuplicate(BaseModel):
+    """Wrapper for a duplicate file result."""
+    status: str = "duplicate"
+    url: HttpUrl
+    message: str
+    existing_file_id: str
+    existing_status: str
+
 class DownloadError(BaseModel):
     """Wrapper for a failed download result."""
     status: str = "error"
     url: HttpUrl
     error: str
 
-DownloadResult = Union[DownloadSuccess, DownloadError]
+DownloadResult = Union[DownloadSuccess, DownloadError, DownloadDuplicate]
 
 class QualityMetrics(BaseModel):
     """Defines the structure for data quality metrics."""
