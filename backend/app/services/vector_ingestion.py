@@ -178,80 +178,80 @@ def extract_date_from_reference(reference):
 def process_and_embed_pdf(file_paths, original_file_name, category, reference, date_str, url):
     """
     Processes PDF file parts, creates chunks and embeddings, and inserts them into Milvus.
-    Returns the number of chunks successfully created and inserted.
+    (Refactored for correctness and clarity)
     """
-    all_page_markdown_list, page_offset = [], 0
+    # Step 1: Extract all text and corresponding page numbers from all PDF parts.
+    all_pages = []
+    page_offset = 0
     for path in file_paths:
         page_markdown_list = extract_markdown_from_pdf(path)
         if not page_markdown_list:
             raise ValueError(f"Failed to extract markdown from document part {path}")
         
+        # Adjust page numbers for multi-part documents
         adjusted_pages = [(page_number + page_offset, markdown) for page_number, markdown in page_markdown_list]
-        all_page_markdown_list.extend(adjusted_pages)
+        all_pages.extend(adjusted_pages)
         page_offset += len(page_markdown_list)
-
-    chunks, page_numbers, urls = [], [], []
-    for page_number, markdown in all_page_markdown_list:
-        english_text = filter_english_lines(markdown)
-        if not english_text.strip(): continue
-        
-        page_chunks = content_aware_chunk(english_text)
-        chunks.extend(page_chunks)
-        page_numbers.extend([page_number] * len(page_chunks))
-        urls.extend([url] * len(page_chunks))
     
-    if not chunks:
+    if not all_pages:
         raise ValueError("No processable content found in the document.")
-        
-    final_embeddings, final_contents = [], []
-    splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
 
-    for chunk, page in zip(chunks, page_numbers):
-        combined = f'Content from {reference}. Page number: {page}. {chunk}'
-        if len(combined) <= 8192:
-            embedding = embedding_model.encode(combined)
-            final_embeddings.append(l2_normalize(np.array(embedding)))
-            final_contents.append(combined)
-        else:
-            # If a section is still too large, split it further
-            sub_chunks = splitter.split_text(chunk)
-            for sub_chunk in sub_chunks:
-                combined_sub = f'Content from {reference}. Page number: {page}. {sub_chunk}'
-                if len(combined_sub) <= 8192:
-                    embedding = embedding_model.encode(combined_sub)
-                    final_embeddings.append(l2_normalize(np.array(embedding)))
-                    final_contents.append(combined_sub)
+    # Step 2: Chunk all the extracted text at once.
+    # This is more robust than your original approach.
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    final_data_to_embed = []
 
-    if not final_contents:
+    for page_number, markdown in all_pages:
+        # Split the text of an entire page into smaller chunks
+        page_chunks = splitter.split_text(markdown)
+        for chunk in page_chunks:
+            # Create the combined content that will be embedded
+            combined_content = f'Content from {reference}. Page number: {page_number}. Chunk: "{chunk}"'
+            
+            # Ensure the combined content doesn't exceed the schema's max length
+            if len(combined_content) <= 8192:
+                final_data_to_embed.append({
+                    "content": combined_content,
+                    "page": page_number,
+                })
+
+    if not final_data_to_embed:
         raise ValueError("Failed to generate any valid chunks for embedding.")
-        
-    # Prepare data for Milvus insertion
-    num_chunks = len(final_contents)
+
+    # Step 3: Create embeddings in a batch (more efficient)
+    contents_to_embed = [item["content"] for item in final_data_to_embed]
+    embeddings = embedding_model.encode(contents_to_embed, show_progress_bar=False)
+    normalized_embeddings = [l2_normalize(emb) for emb in embeddings]
+    
+    # Step 4: Prepare final, correctly synchronized lists for Milvus insertion.
+    num_chunks = len(final_data_to_embed)
     data_to_insert = [
         [original_file_name] * num_chunks,
-        page_numbers[:num_chunks],  # Ensure lists are of the same length
+        [item["page"] for item in final_data_to_embed],
         [category] * num_chunks,
-        final_embeddings,
-        final_contents,
+        normalized_embeddings,
+        contents_to_embed,
         [reference] * num_chunks,
         [date_str] * num_chunks,
-        urls[:num_chunks] # Ensure lists are of the same length
+        [url] * num_chunks,
     ]
     
+    # Step 5: Insert and FLUSH data.
     try:
-        collection.insert(data_to_insert)
-        print(f'Successfully loaded {num_chunks} chunks for PDF: {original_file_name}')
-        return num_chunks
+        mr = collection.insert(data_to_insert)
+        collection.flush()  # <-- CRUCIAL FIX
+        print(f'✅ Successfully inserted and flushed {len(mr.primary_keys)} chunks for PDF: {original_file_name}')
+        return len(mr.primary_keys)
     except (MilvusException, ParamError) as e:
         print(f'[MILVUS ERROR] for {original_file_name}: {e}')
-        raise # Re-raise exception to be caught by the main handler
-
+        raise
 # ==============================================================================
 # 5. Main Ingestion Function
 # ==============================================================================
 
 def ingest_unstructured_file(
     file_path: str,
+    file_name: str,
     category: str,
     reference: str,
     url: str,
@@ -278,7 +278,6 @@ def ingest_unstructured_file(
             error="File not found at the specified path."
         )
 
-    file_name = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
 
     try:
@@ -326,3 +325,21 @@ def ingest_unstructured_file(
             status="failed",
             error=f"An unexpected error occurred: {str(e)}"
         )
+
+def collection_search(query, top_k, file_id):
+    query_embedding = embedding_model.encode(query)
+    query_vector = l2_normalize(np.array(query_embedding)).tolist()
+
+    search_params = {"metric_type": "COSINE", "params": {"ef": 128}}
+    print(query, top_k, file_id)
+
+    results = collection.search(
+        data=[query_vector],
+        anns_field="embeddings",
+        param=search_params,
+        limit=top_k,
+        expr=f'source == "{file_id}"',
+        output_fields=["source", "page", "category", "content", "reference", "date", "url"]
+    )
+    print(results)
+    return results

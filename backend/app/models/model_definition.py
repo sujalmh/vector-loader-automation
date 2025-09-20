@@ -103,3 +103,25 @@ class IngestionResponse(BaseModel):
     results: List[FileIngestionResult]
 
 
+class SearchRequest(BaseModel):
+    file_id: str = Field(..., description="The File ID to search within.")
+    file_name: str = Field(..., description="The source filename to search within (e.g., 'my_report.pdf').")
+    query: str = Field(..., description="The question or text for semantic search.")
+    top_k: int = Field(default=5, ge=1, le=100, description="Number of results to return.")
+
+class SearchResultEntity(BaseModel):
+    source: str
+    page: int
+    category: str
+    content: str
+    reference: str
+    date: str
+    url: str
+
+class SearchResult(BaseModel):
+    id: int
+    distance: float
+    entity: SearchResultEntity
+
+class SearchResponse(BaseModel):
+    results: List[SearchResult]

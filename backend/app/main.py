@@ -9,9 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.services.process_file import process_pdf
-from app.services.vector_ingestion import ingest_unstructured_file
+from app.services.vector_ingestion import ingest_unstructured_file, collection_search
 
-from app.models.model_definition import QualityMetrics, AnalysisResult, FileProcessingResult, FileIngestionResult, IngestionResponse, DownloadResult, UrlListRequest, FileMetadata, DownloadSuccess, DownloadError, DownloadDuplicate, ProcessingResult
+from app.models.model_definition import QualityMetrics, AnalysisResult, FileProcessingResult, FileIngestionResult, IngestionResponse, DownloadResult, UrlListRequest, FileMetadata, DownloadSuccess, DownloadError, DownloadDuplicate, ProcessingResult, SearchResponse, SearchResult, SearchResultEntity, SearchRequest
+
 import app.models.db as db
 
 import hashlib
@@ -281,6 +282,7 @@ async def start_ingestion_process(
 
             full_filepath = details_data.get("path")
             file_id = details_data.get("id") 
+            file_name = details_data.get("name")
 
             try:
                 # --- CORRECTED LOGIC ---
@@ -289,6 +291,7 @@ async def start_ingestion_process(
 
                 ingestion_result_obj = ingest_unstructured_file(
                     file_path=full_filepath,
+                    file_name=file_name,
                     category=analysis.get("subdomain"),
                     reference=analysis.get("publishing_authority"),
                     url=details_data.get("sourceUrl") or "https://www.epfindia.gov.in/",
@@ -434,6 +437,22 @@ async def download_from_urls(request: UrlListRequest):
         results = await asyncio.gather(*tasks)
         return results
     
+@app.post("/search/",
+          response_model=SearchResponse,
+          summary="Search within a specific file",
+          tags=["Search"])
+async def search_in_file(request: SearchRequest):
+    """
+    Performs semantic search for a query, filtered to a specific `file_id`.
+    Returns the top_k most relevant chunks with their metadata.
+    """
+    try:
+        results = collection_search(request.query, request.top_k, request.file_name)
+
+        response_data = [SearchResult(id=h.id, distance=h.distance, entity=h.entity.to_dict()) for h in results[0]]
+        return SearchResponse(results=response_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An internal error occurred during search: {e}")
 
 # @app.post("/ingest/stream")
 # async def start_ingestion_stream(

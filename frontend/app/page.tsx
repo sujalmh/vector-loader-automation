@@ -19,6 +19,7 @@ import FileProcessing from "@/components/file-processing";
 import FileSelectionForIngestion from "@/components/file-selection-ingestion";
 import IngestionProcess from "@/components/ingestion-process";
 import SummaryView from "@/components/summary-view";
+import SearchClient from "@/components/search-client";
 
 // --- Type Definitions ---
 export type AnalysisData = {
@@ -85,6 +86,7 @@ const steps = [
   { id: 3, title: "Filter Files", icon: Filter },
   { id: 4, title: "Ingestion", icon: ArrowRight },
   { id: 5, title: "Summary", icon: CheckCircle },
+  { id: 6, title: "Search & Verify", icon: Database },
 ];
 
 export default function DataLoaderAutomation() {
@@ -231,6 +233,13 @@ export default function DataLoaderAutomation() {
               />
             )}
             {currentStep === 5 && <SummaryView files={files} />}
+            {currentStep === 6 && (
+              <SearchClient
+                ingestedFiles={files.filter(
+                  (f) => f.ingestionStatus === "success"
+                )}
+              />
+            )}
           </CardContent>
         </Card>
 

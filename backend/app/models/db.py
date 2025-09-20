@@ -83,7 +83,7 @@ async def init_db():
 
         # Create the main table for storing file processing records
         await connection.execute("""
-            CREATE TABLE IF NOT EXISTS file_records (
+            CREATE TABLE IF NOT EXISTS  file_records (
                 file_id TEXT PRIMARY KEY,
                 file_hash TEXT NOT NULL,
                 file_name TEXT NOT NULL,
