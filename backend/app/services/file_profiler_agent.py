@@ -197,7 +197,7 @@ class FileAnalyzer:
         - file_name
         - domain: broad domain (e.g., Finance, Healthcare, Legal)
         - subdomain: short tag
-        - intents: Specific intents (e.g., India GST Collections, State of Assam econometrics)
+        - intents: concise description of the document's specific focus or topic, inferred from the content (e.g., Inflation trends Q1 FY2025, Industrial production growth, Fiscal deficit analysis). Do NOT restrict to predefined options; generate dynamically from content.
         - publishing_authority: Publishing organization or committee, (e.g. Inflation Expectations Survey of Households March 2019, Monetary Policy Report April 2018)
         - published_date: Fiscal year or month of reference, format Month YYYY or YYYY
         - period_of_reference: Date range within the document
@@ -205,6 +205,7 @@ class FileAnalyzer:
         - quality_score: A file quality score out of 3, how well the file can be parsed (1-3)
 
         Rules:
+        - For 'domain', NEVER use generic domains like Finance, Healthcare, Legal. Instead infer a specific economic/statistical category, short and meaningful (examples: CPI, IIP, GDP, WPI, BALANCE_OF_PAYMENTS, FOREIGN_TRADE_REPORT, MONETARY_POLICY_COMMITTEE_MINUTES).
         - Output valid JSON and nothing else.
 
         File: {file_name}
