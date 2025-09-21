@@ -126,7 +126,7 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
           <Select
             value={formData.file_id}
             onValueChange={(value) =>
-              setFormData((prev) => ({ ...prev, file_id: value }))
+              setFormData((prev) => ({ ...prev, file_id: value, file_name: value }))
             }
           >
             <SelectTrigger>
