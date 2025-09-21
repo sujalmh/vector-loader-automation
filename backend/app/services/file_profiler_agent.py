@@ -193,23 +193,34 @@ class FileAnalyzer:
             return {"ok": False, "error": "OpenAI client not initialized. Check API key."}
 
         prompt = f"""
-        You are an expert file diagnoser. Return ONLY a compact JSON object with keys:
-        - file_name
-        - domain: broad domain (e.g., Finance, Healthcare, Legal)
-        - subdomain: short tag
-        - intents: concise description of the document's specific focus or topic, inferred from the content (e.g., Inflation trends Q1 FY2025, Industrial production growth, Fiscal deficit analysis). Do NOT restrict to predefined options; generate dynamically from content.
-        - publishing_authority: Publishing organization or committee, (e.g. Inflation Expectations Survey of Households March 2019, Monetary Policy Report April 2018)
-        - published_date: Fiscal year or month of reference, format Month YYYY or YYYY
-        - period_of_reference: Date range within the document
-        - brief_summary: A concise summary (<= 3 sentences)
-        - quality_score: A file quality score out of 3, how well the file can be parsed (1-3)
+        You are an expert file diagnoser for economic reports. Your task is to analyze the provided text from a document and return ONLY a compact JSON object.
 
-        Rules:
-        - For 'domain', NEVER use generic domains like Finance, Healthcare, Legal. Instead infer a specific economic/statistical category, short and meaningful (examples: CPI, IIP, GDP, WPI, BALANCE_OF_PAYMENTS, FOREIGN_TRADE_REPORT, MONETARY_POLICY_COMMITTEE_MINUTES).
-        - Output valid JSON and nothing else.
+        ## JSON Keys & Instructions:
 
-        File: {file_name}
-        Content:
+        - **file_name**: The name of the file.
+        - **domain**: Identify the **specific economic report name or key indicator** from the document's content itself. The value must be derived from the text.
+            - *Examples for format*: "Consumer Price Index", "Index of Industrial Production", "State Finances Report", "Foreign Trade Statistics".
+        - **subdomain**: A short tag classifying the document type.
+            - *Examples for format*: "Press Release", "Committee Minutes", "Annual Report", "Survey Data".
+        - **intents**: Based on the text, state the **primary querying purpose** of this file as a concise, action-oriented phrase.
+            - *Examples for format*: "To query monthly inflation rates," "To analyze industrial growth sector-wise," "To track import-export data," "To understand trends in state government debt."
+        - **publishing_authority**: The official organization that published the document.
+        - **published_date**: The publication month and year in "Month YYYY" format.
+        - **period_of_reference**: The time period the data in the document refers to.
+        - **brief_summary**: A concise, neutral summary of the document's purpose (max 3 sentences).
+        - **quality_score**: A score from 1-3 on how structured and parsable the document text is.
+
+        ---
+        ## Critical Rules:
+
+        1.  Output **only** the raw JSON object and nothing else.
+        2.  The examples provided are for **guidance on the expected format only**.
+        3.  You **MUST** determine the `domain` and `intents` by analyzing the actual file content. **DO NOT simply copy the examples.**
+
+        ---
+
+        **File**: {file_name}
+        **Content**:
         {text[:text_limit]}
         """.strip()
 
