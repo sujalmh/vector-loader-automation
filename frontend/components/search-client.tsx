@@ -64,7 +64,7 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
     file_id: ingestedFiles[0]?.name || "",
     file_name: ingestedFiles[0]?.name || "",
     query: "What were the total revenues?",
-    top_k: 3,
+    top_k: 5,
   });
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
