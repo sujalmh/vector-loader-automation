@@ -28,16 +28,18 @@ MISTRAL_OCR_KEY = os.getenv("MISTRAL_OCR_KEY")
 client = Mistral(api_key=MISTRAL_OCR_KEY)
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = int(os.getenv("MILVUS_PORT", 19530))
+MILVUS_DB = os.getenv("MILVUS_DB", "test_db")
+MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "vector_ingestion")
 
 # Connect to Milvus
 conn = connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
+db_name = MILVUS_DB
 
-db_name = "test_db"
 if db_name not in db.list_database():
     db.create_database(db_name)
 db.using_database(db_name)
 
-collection_name = "vector_ingestion"
+collection_name = MILVUS_COLLECTION
 
 if not utility.has_collection(collection_name):
     # Define schema
