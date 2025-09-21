@@ -90,7 +90,8 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
     setResults(null);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/search/", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+      const response = await fetch(`${apiUrl}/ingest/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
