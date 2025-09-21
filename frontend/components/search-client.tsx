@@ -74,6 +74,7 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
     if (ingestedFiles.length > 0 && !formData.file_id) {
       setFormData((prev) => ({
         ...prev,
+        file_name: ingestedFiles[0].name,
         file_id: ingestedFiles[0].name,
       }));
     }
