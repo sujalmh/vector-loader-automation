@@ -259,7 +259,7 @@ class FileAnalyzer:
             - **intents**: Based on the text, state the **primary querying purpose** of this file as a concise, action-oriented phrase.
                 - *Examples for format*: "To query monthly inflation rates," "To analyze industrial growth sector-wise," "To track import-export data," "To understand trends in state government debt."
             - **publishing_authority**: The official organization that published the document.
-            - **published_date**: The publication month and year in strictly in "Month YYYY" format.
+            - **published_date**: The publication month and year in strictly in "Month YYYY" format, if it is not present return the start of reference date in "Month YYYY" format.
             - **period_of_reference**: The time period the data in the document refers to.
             - **brief_summary**: A concise, neutral summary of the document's purpose (max 3 sentences).
             - **quality_score**: A score from 1-3 on how structured and parsable the document text is.
