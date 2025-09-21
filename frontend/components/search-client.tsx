@@ -78,7 +78,7 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
         file_id: ingestedFiles[0].name,
       }));
     }
-  }, [ingestedFiles, formData.file_id]);
+  }, [ingestedFiles, formData.file_id, formData.file_name]);
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
