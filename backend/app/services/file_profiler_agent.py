@@ -319,7 +319,7 @@ class FileAnalyzer:
         # 1. Extract text
         print(f"Extracting text from {file_path}")
         extracted_text, err = self._extract_text(p)
-        print(extracted_text)
+
         if err:
             print(f"Extraction failed: {err}")
             return {"error": f"Extraction failed: {err}", "file_path": file_path}
