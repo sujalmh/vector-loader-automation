@@ -91,7 +91,7 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${apiUrl}/ingest/`, {
+      const response = await fetch(`${apiUrl}/search/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
