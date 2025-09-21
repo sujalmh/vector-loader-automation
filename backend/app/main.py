@@ -447,6 +447,7 @@ async def search_in_file(request: SearchRequest):
     Returns the top_k most relevant chunks with their metadata.
     """
     try:
+        print(request.file_name)
         results = collection_search(request.query, request.top_k, request.file_name)
 
         response_data = [SearchResult(id=h.id, distance=h.distance, entity=h.entity.to_dict()) for h in results[0]]
