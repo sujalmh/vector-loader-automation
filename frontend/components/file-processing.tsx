@@ -84,7 +84,7 @@ export default function FileProcessing({
         formData.append("file_ids", file.id);
       }
     });
-
+    console.log("FormData:", formData)
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${apiUrl}/process-files`, {
