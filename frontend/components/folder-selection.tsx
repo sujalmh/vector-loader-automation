@@ -78,12 +78,19 @@ export default function FileSelection({
 
   const handleUrlUpload = async () => {
     if (!urlInput.trim() || isLoading) return;
-    const urls = urlInput
-      .split(",")
-      .map((url) => url.trim())
-      .filter(Boolean);
-    if (urls.length === 0) return;
 
+    const rawUrls = urlInput
+    .split(/,(?=\s*https?:\/\/)|\n+/)
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+    const urls = rawUrls.map((u) => encodeURI(u));
+
+  // Guard clause: Exit if the final array of URLs is empty.
+  if (urls.length === 0) return;
+
+
+    console.log("Uploading URLs:", urls)
     setIsLoading(true);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL;

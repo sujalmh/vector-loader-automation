@@ -31,8 +31,15 @@ import aiofiles
 import uuid
 import base64
 
-UPLOAD_DIRECTORY = Path("uploaded_files")
-MARKDOWN_DIRECTORY = "markdown_output"
+from dotenv import load_dotenv
+load_dotenv()
+
+UPLOAD_DIRECTORY_PATH = os.environ.get("UPLOAD_DIRECTORY_PATH", "/data/vl/uploaded_files")
+MARKDOWN_DIRECTORY_PATH = os.environ.get("MARKDOWN_DIRECTORY_PATH", "/data/vl/markdown_output")
+
+
+UPLOAD_DIRECTORY = Path(UPLOAD_DIRECTORY_PATH)
+MARKDOWN_DIRECTORY = MARKDOWN_DIRECTORY_PATH
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,14 +48,12 @@ async def lifespan(app: FastAPI):
     This replaces the deprecated on_event("startup") and on_event("shutdown").
     """
     # --- Startup Event ---
-    # Ensure the upload directory exists when the application starts.
     UPLOAD_DIRECTORY.mkdir(exist_ok=True)
     await db.connect_db()
     await db.init_db()
 
     yield
     # --- Shutdown Event ---
-    # Add any cleanup tasks here if needed.
     await db.disconnect_db() 
     print("Application shutdown complete.")
 
@@ -355,10 +360,22 @@ async def start_ingestion_process(
 async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> DownloadResult:
     try:
         # Step 1: Download the entire file content into memory
-        async with client.stream("GET", str(url), follow_redirects=True, timeout=30.0) as response:
-            response.raise_for_status()
-            file_bytes = await response.aread()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+        }
 
+        print(url)
+        try:
+            async with client.stream("GET", str(url), headers=headers, follow_redirects=True, timeout=30.0) as response:
+                response.raise_for_status()
+                file_bytes = await response.aread()
+                if not file_bytes:
+                    raise ValueError("Downloaded file is empty.")
+
+        except Exception as e:
+            print(f"An error occurred while downloading the file: {e}")
+            return DownloadError(url=url, error=f"An error occurred while downloading the file: {e}")
+        
         # Step 2: Calculate the file's hash
         file_hash = calculate_sha256(file_bytes)
 
@@ -415,10 +432,13 @@ async def download_and_save_file(client: httpx.AsyncClient, url: HttpUrl) -> Dow
         )
 
     except httpx.HTTPStatusError as e:
+        print(f"An unexpected error occurred: {e}")
         return DownloadError(url=url, error=f"HTTP error: {e.response.status_code}")
     except httpx.RequestError as e:
+        print(f"An unexpected error occurred: {e}")
         return DownloadError(url=url, error=f"Network error: {e.__class__.__name__}")
     except Exception as e:
+        print(f"An unexpected error occurred: {e}")
         return DownloadError(url=url, error=f"An unexpected error occurred: {e}")
 
 @app.post("/download-from-urls", response_model=List[DownloadResult])

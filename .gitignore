@@ -6,3 +6,5 @@ __pycache__/
 backend/app/models/__pycache__/model_definition.cpython-312.pyc
 backend/app/services/__pycache__/file_profiler_agent.cpython-312.pyc
 backend/app/services/__pycache__/vector_ingestion.cpython-312.pyc
+backend/app/services/__pycache__/file_profiler_agent.cpython-312.pyc
+backend/app/services/__pycache__/vector_ingestion.cpython-312.pyc
