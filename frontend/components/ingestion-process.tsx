@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import {
   Card,
@@ -28,6 +28,14 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { FileData } from "@/app/page";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // --- TYPE DEFINITIONS ---
 
@@ -59,10 +67,41 @@ export default function IngestionProcess({
   const [apiError, setApiError] = useState<string | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 
+  const [collections, setCollections] = useState<string[]>([]);
+  const [selectedCollection, setSelectedCollection] = useState<string>("");
+  const [isLoadingCollections, setIsLoadingCollections] = useState(true);
+  const [collectionError, setCollectionError] = useState<string | null>(null);
+
   const selectedFiles = files.filter((f) => f.selected && f.processed);
+
+  useEffect(() => {
+    const fetchCollections = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+        const response = await fetch(`${apiUrl}/collections/`);
+        if (!response.ok) throw new Error("Failed to fetch collections.");
+        
+        const data: string[] = await response.json();
+        setCollections(data);
+        if (data.length > 0) {
+          setSelectedCollection(data[0]); // Default to the first collection
+        }
+      } catch (error) {
+        setCollectionError(error instanceof Error ? error.message : "An unknown error occurred.");
+      } finally {
+        setIsLoadingCollections(false);
+      }
+    };
+    fetchCollections();
+  }, []);
 
   const handleIngestion = async (filesToProcess: FileData[]) => {
     if (filesToProcess.length === 0) return;
+
+    if (!selectedCollection) {
+      setApiError("Please select a target collection first.");
+      return;
+    }
 
     setIsIngesting(true);
     setApiError(null);
@@ -88,6 +127,7 @@ export default function IngestionProcess({
       return details;
     });
     formData.append("file_details", JSON.stringify(fileDetails));
+    formData.append("collection_name", selectedCollection);
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -265,11 +305,36 @@ export default function IngestionProcess({
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-6 space-y-2">
+            <Label htmlFor="collection-select">Target Collection</Label>
+            <Select
+              value={selectedCollection}
+              onValueChange={setSelectedCollection}
+              disabled={isLoadingCollections || collections.length === 0}
+            >
+              <SelectTrigger id="collection-select">
+                <SelectValue placeholder={
+                  isLoadingCollections ? "Loading..." : 
+                  collectionError ? "Error loading collections" :
+                  "Select a collection"
+                } />
+              </SelectTrigger>
+              <SelectContent>
+                {collections.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {collectionError && <p className="text-sm text-red-600 mt-1">{collectionError}</p>}
+          </div>
+
           <div className="flex items-center gap-4 mb-4">
             <Button
               onClick={startIngestion}
               disabled={
-                isIngesting || selectedFiles.length === 0 || allFilesIngested
+                isIngesting || selectedFiles.length === 0 || allFilesIngested || !selectedCollection
               }
               className="flex items-center gap-2"
             >

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.services.process_file import process_pdf
-from app.services.vector_ingestion import ingest_unstructured_file, collection_search
+from app.services.vector_ingestion import ingest_unstructured_file, collection_search, list_collections
 
 from app.models.model_definition import QualityMetrics, AnalysisResult, FileProcessingResult, FileIngestionResult, IngestionResponse, DownloadResult, UrlListRequest, FileMetadata, DownloadSuccess, DownloadError, DownloadDuplicate, ProcessingResult, SearchResponse, SearchResult, SearchResultEntity, SearchRequest
 
@@ -267,6 +267,7 @@ async def process_files_endpoint(
 async def start_ingestion_process(
     files: List[UploadFile] = File(...),
     file_details: str = Form(...),
+    collection_name: str = Form(...)
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files were provided for ingestion.")
@@ -297,6 +298,7 @@ async def start_ingestion_process(
                 ingestion_result_obj = ingest_unstructured_file(
                     file_path=full_filepath,
                     file_name=file_name,
+                    collection_name=collection_name,
                     category=analysis.get("subdomain"),
                     reference=analysis.get("publishing_authority"),
                     url=details_data.get("sourceUrl") or "https://www.epfindia.gov.in/",
@@ -311,7 +313,8 @@ async def start_ingestion_process(
                 if result_payload.get("status") == "success":
                     await db.log_ingestion_result(
                         file_id, 
-                        result_payload.get("ingestionDetails")
+                        result_payload.get("ingestionDetails"),
+                        collection_name
                     )
                 else: # Handle ingestion failure reported by the function
                     await db.log_error(
@@ -467,13 +470,36 @@ async def search_in_file(request: SearchRequest):
     Returns the top_k most relevant chunks with their metadata.
     """
     try:
-        print(request.file_name)
-        results = collection_search(request.query, request.top_k, request.file_name)
+        print(request)
+
+        collection_name = await db.get_collection_for_file(request.file_id)
+        if not collection_name:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File '{request.file_name}' not found or has not been ingested yet."
+            )
+
+        results = collection_search(query=request.query, top_k=request.top_k, file_name=request.file_name, file_id=request.file_id, collection_name=collection_name)
 
         response_data = [SearchResult(id=h.id, distance=h.distance, entity=h.entity.to_dict()) for h in results[0]]
         return SearchResponse(results=response_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An internal error occurred during search: {e}")
+
+@app.get("/collections/", response_model=List[str], tags=["Milvus"])
+async def get_milvus_collections():
+    """
+    Retrieves a list of all collection names from Milvus.
+    """
+    try:
+        collections = list_collections()
+        return collections
+    except Exception as e:
+        print(f"Error fetching Milvus collections: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not connect to Milvus or fetch collections: {e}"
+        )
 
 # @app.post("/ingest/stream")
 # async def start_ingestion_stream(

@@ -31,12 +31,7 @@ import {
   BookUser,
 } from "lucide-react";
 
-// Assuming FileData is imported from its definition file
-type FileData = {
-  id: string;
-  name: string;
-  path: string;
-};
+import type { FileData } from "@/app/page";
 
 // --- 1. TYPE DEFINITIONS ---
 interface SearchResultEntity {
@@ -61,7 +56,7 @@ interface SearchClientProps {
 
 export default function SearchClient({ ingestedFiles }: SearchClientProps) {
   const [formData, setFormData] = useState({
-    file_id: ingestedFiles[0]?.name || "",
+    file_id: ingestedFiles[0]?.id || "",
     file_name: ingestedFiles[0]?.name || "",
     query: "What were the total revenues?",
     top_k: 5,
@@ -70,12 +65,14 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  console.log(ingestedFiles)
+
   useEffect(() => {
     if (ingestedFiles.length > 0 && !formData.file_id) {
       setFormData((prev) => ({
         ...prev,
         file_name: ingestedFiles[0].name,
-        file_id: ingestedFiles[0].name,
+        file_id: ingestedFiles[0].id,
       }));
     }
   }, [ingestedFiles, formData.file_id, formData.file_name]);
@@ -92,6 +89,7 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+      
       const response = await fetch(`${apiUrl}/search/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -126,16 +124,21 @@ export default function SearchClient({ ingestedFiles }: SearchClientProps) {
           <Label htmlFor="file_id">Select Ingested File</Label>
           <Select
             value={formData.file_id}
-            onValueChange={(value) =>
-              setFormData((prev) => ({ ...prev, file_id: value, file_name: value }))
-            }
+            onValueChange={(value) => {
+              const selectedFile = ingestedFiles.find((f) => f.id === value);
+              setFormData((prev) => ({
+                ...prev,
+                file_id: selectedFile?.id || "",
+                file_name: selectedFile?.name || "",
+              }));
+            }}
           >
             <SelectTrigger>
               <SelectValue placeholder="Select a file..." />
             </SelectTrigger>
             <SelectContent>
               {ingestedFiles.map((file) => (
-                <SelectItem key={file.id} value={file.name}>
+                <SelectItem key={file.id} value={file.id}>
                   {file.name}
                 </SelectItem>
               ))}

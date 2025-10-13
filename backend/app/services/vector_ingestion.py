@@ -29,7 +29,7 @@ client = Mistral(api_key=MISTRAL_OCR_KEY)
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = int(os.getenv("MILVUS_PORT", 19530))
 MILVUS_DB = os.getenv("MILVUS_DB", "test_db")
-MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "vector_ingestion")
+MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "vector_ingestion_2")
 
 # Connect to Milvus
 conn = connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
@@ -82,6 +82,11 @@ embedding_model = SentenceTransformer(embedding_model_name, trust_remote_code=Tr
 # ==============================================================================
 # 3. Helper Functions
 # ==============================================================================
+
+def list_collections():
+    db.using_database(MILVUS_DB)
+    collections = utility.list_collections()
+    return collections
 
 from datetime import datetime
 
@@ -177,12 +182,21 @@ def extract_date_from_reference(reference):
 # 4. Core Processing Logic
 # ==============================================================================
 
-def process_and_embed_pdf(file_paths, original_file_name, category, reference, date_str, url):
+def process_and_embed_pdf(file_paths, original_file_name, category, reference, date_str, url, collection_name: str):
     """
     Processes PDF file parts, creates chunks and embeddings, and inserts them into Milvus.
     (Refactored for correctness and clarity)
     """
     # Step 1: Extract all text and corresponding page numbers from all PDF parts.
+    try: 
+        if not utility.has_collection(collection_name):
+            raise ValueError(f"Collection '{collection_name}' does not exist in Milvus.")
+        collection = Collection(name=collection_name)
+        collection.load()
+    except Exception as e:
+        print(f"[MILVUS ERROR] Could not access collection '{collection_name}': {e}")
+        raise
+
     all_pages = []
     page_offset = 0
     for path in file_paths:
@@ -254,6 +268,7 @@ def process_and_embed_pdf(file_paths, original_file_name, category, reference, d
 def ingest_unstructured_file(
     file_path: str,
     file_name: str,
+    collection_name: str,
     category: str,
     reference: str,
     url: str,
@@ -275,6 +290,7 @@ def ingest_unstructured_file(
     if not os.path.exists(file_path):
         return FileIngestionResult(
             fileName=os.path.basename(file_path),
+            fileId=fileId,
             fileSize=0,
             status="failed",
             error="File not found at the specified path."
@@ -294,6 +310,7 @@ def ingest_unstructured_file(
         chunks_created = process_and_embed_pdf(
             file_paths=split_files,
             original_file_name=file_name,
+            collection_name=collection_name,
             category=category,
             reference=reference,
             date_str=date_str,
@@ -328,20 +345,25 @@ def ingest_unstructured_file(
             error=f"An unexpected error occurred: {str(e)}"
         )
 
-def collection_search(query, top_k, file_id):
+def collection_search(query, top_k, file_name, file_id, collection_name):
+    if not utility.has_collection(collection_name):
+        raise ValueError(f"Collection '{collection_name}' does not exist in Milvus.")
+
+    collection = Collection(name=collection_name)
+    collection.load()
+
     query_embedding = embedding_model.encode(query)
     query_vector = l2_normalize(np.array(query_embedding)).tolist()
 
     search_params = {"metric_type": "COSINE", "params": {"ef": 128}}
-    print(query, top_k, file_id)
 
     results = collection.search(
         data=[query_vector],
         anns_field="embeddings",
         param=search_params,
         limit=top_k,
-        expr=f'source == "{file_id}"',
+        expr=f'source == "{file_name}"',
         output_fields=["source", "page", "category", "content", "reference", "date", "url"]
     )
-    print(results)
+
     return results

@@ -156,9 +156,9 @@ async def log_analysis_result(file_id, analysis_data, status="ANALYZED"):
             file_id
         )
 
-async def log_ingestion_result(file_id, ingestion_data, status="INGESTED"):
+async def log_ingestion_result(file_id, ingestion_data, collection_name, status="INGESTED"):
     """
-    Updates a file record with the final ingestion results.
+    Updates a file record with the final ingestion results and collection name.
     """
     pool = await get_db_pool()
     ingestion_json = json.dumps(ingestion_data)
@@ -166,11 +166,13 @@ async def log_ingestion_result(file_id, ingestion_data, status="INGESTED"):
         await connection.execute(
             """
             UPDATE file_records
-            SET ingestion_details = $1, status = $2
-            WHERE file_id = $3;
+            SET
+                ingestion_details = $1, status = $2, collection_name = $3
+            WHERE file_id = $4;
             """,
             ingestion_json,
             status,
+            collection_name,
             file_id
         )
 
@@ -198,10 +200,22 @@ async def check_duplicate(file_hash: str):
     """
     pool = await get_db_pool()
     async with pool.acquire() as connection:
-        # Fetch the record if the hash matches
         record = await connection.fetchrow(
             "SELECT file_id, status FROM file_records WHERE file_hash = $1",
             file_hash
         )
-        # Return the record as a dictionary if found, otherwise None
         return dict(record) if record else None
+
+async def get_collection_for_file(file_id: str) -> str | None:
+    """
+    Retrieves the Milvus collection name for a given file_id from Postgres.
+    """
+    pool = await get_db_pool()
+    print(file_id)
+    async with pool.acquire() as connection:
+        collection_name = await connection.fetchval(
+            "SELECT collection_name FROM file_records WHERE file_id = $1",
+            file_id
+        )
+    print(collection_name)
+    return collection_name
